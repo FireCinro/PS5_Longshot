@@ -23,8 +23,11 @@ bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t
 /// Frame generation by row and the FPS counter name. None: none made (Off, nothing to blend from, none for half a second).
 /// DlssPaused: DLSS FG chosen, and the sets were the game's frames alone, with no Upscaler picture to make frames from (the
 /// game's own menus, movies and loading screens: vk_dlss.cpp dlss_fg_holds)
-enum class FgMaker { None, BuiltIn, Dlss, Fsr3, DlssPaused };
+enum class FgMaker { None, BuiltIn, Dlss, Fsr3, DlssPaused, Mihawk };
 FgMaker framegen_maker();
+/// (PS5) The generator the Frame generation by row names was asked for and is not there (no network file): the
+/// renderer's own makes the frames, and the row's line says so
+bool framegen_by_missing();
 /// The first frame the last framegen_record made (null when it made none), w x h, GENERAL; with RX_VK_SHOT_MADE=all, each
 /// call the next of its made frames in turn, its place in the set in index
 VkImage framegen_made_image(uint32_t* w, uint32_t* h, int* index = nullptr);

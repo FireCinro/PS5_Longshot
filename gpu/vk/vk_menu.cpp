@@ -44,6 +44,7 @@
 #include "vk_menu_keys.h"   // (which gamepad buttons confirm and go back: those A and B are bound to)         // (how it looks: Dear ImGui, vk_imgui.h)
 #include "vk_dlss.h"
 #include "vk_framegen.h"   // (Frame generation by: who makes the frames now, framegen_maker)
+#include "fg_by.h"         // (PS5: the row's two more values)
 #include "vk_bug_report.h"   // (the Gameplay tab's Bug report: what it writes, and how)
 #include "../../host/hos_wide_size.h"   // (the widescreen picture's size, as host/hos_main.c works it out)
 #include "../../host/audio_output_devices.h"
@@ -1208,6 +1209,7 @@ const char* framegen_maker_name() {
     case FgMaker::Fsr3: return "FSR 3.1 FG";
     case FgMaker::BuiltIn: return "Built-in FG";
     case FgMaker::DlssPaused: return "DLSS FG paused";
+    case FgMaker::Mihawk: return "MihawkGen FG";
     default: return nullptr;
     }
 }
@@ -1216,6 +1218,7 @@ const char* framegen_maker_name() {
 /// Who makes the frames now (the game's own menus give DLSS-G nothing to make them from) is the row's line and the FPS
 /// counter's (framegen_maker_name), not the choice's name
 const char* tx_framegen_by(int v) {
+    if (v == fg_by::kMihawk) return "MihawkGen";   // (PS5's own: fg_by::kMost)
     if (framegen_by_dlss_offered() && (v == 0 || dlss_fg_forced())) return "DLSS FG";
     return v == 1 ? "Built-in FG" : "FSR 3.1 FG";
 }
@@ -1250,6 +1253,23 @@ const char* framegen_skip_text(int why, unsigned most) {
 /// (every one): the choice's; at DLSS FG "Not DLSS FG now: " with each reason, and the paused line; the switch's line; then
 /// "DLSS FG cannot run: " with each of its reasons
 const char* hn_framegen_by(int v, int variant) {
+#ifdef __PROSPERO__   // (the console's generators, fg_by.h: no DLSS there, so none of the lines below. Variants: the
+                     // value's line, then the ones for when its generator is not making the frames)
+    static const char* const ps5[] = {
+        nullptr,   // (the console's row has no Auto)
+        "The renderer's own: made from the finished picture alone.",
+        nullptr,   // (2: FSR 3.1 FG's in upstream, not a value here: fg_by.h)
+        "PS5_MihawkGen's trained network, from the finished picture. Above 3x the built-in one makes the frames.",
+    };
+    static const char* const missing[] = {
+        nullptr, nullptr, nullptr,
+        "MihawkGen's network did not load (framegen/network.fgw): the built-in one makes the frames.",
+    };
+    v = fg_by::known(std::clamp(v, (int)fg_by::kLeast, (int)fg_by::kMost));
+    if (variant == 0) return ps5[v];
+    if (variant > 0) return variant == 1 ? missing[v] : nullptr;
+    return missing[v] && opts.framegen >= 1 && framegen_by_missing() ? missing[v] : ps5[v];
+#endif
     static const char* const t[] = {
         "NVIDIA DLSS Frame Generation (RTX 40 and newer), made from the Upscaler's depth and motion.",
         "The renderer's own: made from the finished picture alone.",
@@ -3189,6 +3209,9 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
     if (r.value == &output_pick && output_forced()) return;
     // (nothing else to choose: no change, no save. A saved choice that cannot run here is kept)
     if (row_fixed(r.value)) return;
+#ifdef __PROSPERO__   // (the console's Frame generation by row steps over FSR 3.1 FG's number: fg_by.h)
+    if (r.value == &opts.framegen_by) v = fg_by::step_over(v, dir);
+#endif
     // (the scaling rows: only what can run here; the Render resolution row through the Upscaler's own steps)
     // (the Upscaler by engine; the Render resolution's Native is the engine's full-size form: upscaler_rows.h)
     if (r.value == &opts.dlss) v = ur::step_engine(upscaler(), dir, upscalers_available());
@@ -5476,6 +5499,15 @@ void menu_init() {
     if (done) return;
     done = true;
     for (auto& count : item_counts) count.store(-1, std::memory_order_relaxed);
+#ifdef __PROSPERO__
+    // (PS5: the Frame generation by row is the console's generators there, fg_by.h. The table has the PC's row as it is
+    // written; its range and its help are set here, before the options file is read)
+    for (Row& r : rows)
+        if (r.value == &opts.framegen_by) {
+            r.lo = fg_by::kLeast, r.hi = fg_by::kMost;
+            r.help = "Who makes the frames. Changes at once.";
+        }
+#endif
     bool has_options = false;
     bool has_output = false;   // (an output_res= line: the Output resolution chosen; none: hos_output_default, as the host)
     bool has_memory_budget = false;   // (a file from before memory_budget: its preset's)
@@ -5515,6 +5547,10 @@ void menu_init() {
                         const int bit = 1 << i;
                         opts.hold_toggle = atoi(eq + 1) == 1 ? opts.hold_toggle | bit : opts.hold_toggle & ~bit;
                     }
+#ifdef __PROSPERO__   // (a file's Auto, the row's value before it had the console's generators: the network's, as it was)
+            if (!strcmp(line, "frame_generation_by") && atoi(eq + 1) < fg_by::kLeast) opts.framegen_by = fg_by::kDefault;
+            if (!strcmp(line, "frame_generation_by")) opts.framegen_by = fg_by::known(opts.framegen_by);   // (a 2: fg_by.h)
+#endif
             has_resolution |= !strcmp(line, "resolution");
             has_output |= !strcmp(line, "output_res");
             v2 |= !strcmp(line, "options_version");

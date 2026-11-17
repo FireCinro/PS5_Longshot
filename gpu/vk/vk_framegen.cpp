@@ -29,6 +29,7 @@
 #include "vk_fsr3_inputs.h"   // (AMD FSR 3.1 frame interpolation's depth and motion)
 #include "vk_fsr3fi.h"
 #include "vk_menu.h"
+#include "fg_by.h"
 #include "vk_present_rect.h"
 #include "crt_policy.h"
 #include "vk_gprof.h"
@@ -122,6 +123,7 @@ struct State {
     OutSet* recorded = nullptr;   // (the set the last framegen_record filled, for framegen_queue)
     int64_t recorded_at = 0;
     int mult = 0;   // (the multiplier the sets' frames were made for)
+    int by = -1;    // (PS5: the Frame generation by row the generators were made for, fg_by.h)
     int64_t game_ns = 0;     // (Auto: the game's frame time, smoothed: the delay its frames are shown at)
     int64_t slot_next = 0;   // (Auto: the display's next refresh to be given a frame, on the game's timeline)
     // (a fixed multiplier's sets on the game's timeline: the delay past their lead (pace_lead) that the GPU asks for,
@@ -459,6 +461,7 @@ void neural_drop() {   // (with drop_size: the device is idle)
 }
 
 bool neural_ready() {   // (after ensure_size: the context is made for the frames' size)
+    if (!fg_by::wants_network(fg.by)) return false;   // (the row: not asked for, so not loaded)
     if (neural.tried) return neural.ctx != nullptr;
     neural.tried = true;
     if (const char* e = getenv("RX_VK_MIHAWKGEN"); e && e[0] == '0') return false;
@@ -526,6 +529,7 @@ bool neural_frames(VkCommandBuffer cmd, int set, int prev, int cur, int n, const
 }
 #endif
 
+
 // Only after the display jobs and device have drained (ensure_size), or before any frame used these images.
 void drop_size() {
 #ifdef HOOKSHOT_MIHAWKGEN
@@ -543,7 +547,23 @@ void drop_size() {
 }
 
 bool ensure_size(VkCommandBuffer cmd, uint32_t w, uint32_t h) {
-    if (fg.w == w && fg.h == h && fg.mult == multiplier()) return true;
+    // (PS5: the Frame generation by row too. The network is made where the row names it and let go with the rest below,
+    // so a change of the row to the renderer's own frees its images)
+#ifdef HOOKSHOT_MIHAWKGEN
+    // (a test run with no one at the menu: RX_VK_FRAMEGEN_BY_CYCLE=<seconds> moves the row on to its next value every
+    // that many seconds, as a player would there)
+    static const int64_t cycle = getenv("RX_VK_FRAMEGEN_BY_CYCLE") ? (int64_t)atoi(getenv("RX_VK_FRAMEGEN_BY_CYCLE")) * 1000000000 : 0;
+    static int64_t cycle_next = 0;
+    if (cycle > 0) {
+        const int64_t t = now_ns();
+        if (!cycle_next) cycle_next = t + cycle;
+        else if (t >= cycle_next) cycle_next = t + cycle, opts.framegen_by = opts.framegen_by >= fg_by::kMost ? fg_by::kLeast : fg_by::step_over(opts.framegen_by + 1, 1);
+    }
+    const int by = fg_by::known(std::clamp(opts.framegen_by, 0, (int)fg_by::kMost));
+#else
+    const int by = 0;
+#endif
+    if (fg.w == w && fg.h == h && fg.mult == multiplier() && fg.by == by) return true;
     {   // (the display thread is done with the old sets first)
         std::unique_lock lk(fg.mu);
         fg.cv.wait(lk, [] { return fg.jobs.empty() && !fg.sets[0].busy && !fg.sets[1].busy && !fg.sets[2].busy; });
@@ -574,7 +594,10 @@ bool ensure_size(VkCommandBuffer cmd, uint32_t w, uint32_t h) {
         logf("vk: frame interpolation: its images (%ux%u) were not made: off", w, h);
         return false;
     }
-    fg.w = w, fg.h = h, fg.mult = mult;
+#ifdef HOOKSHOT_MIHAWKGEN
+    if (fg.by != by) logf("vk: frame interpolation by: %s", fg_by::name(by));
+#endif
+    fg.w = w, fg.h = h, fg.mult = mult, fg.by = by;
     for (int i = 0; i < 2; i++) {
         to_general(cmd, fg.frames[i].image), to_general(cmd, fg.lumas[i].image), to_general(cmd, fg.flows[i].image);
     }
@@ -1100,7 +1123,7 @@ void display_main() {
 // (longshot) The last sets' makers (framegen_maker): each framegen_record notes its set's on the replay thread; the menu's
 // thread reads the counts. A ring of kMakerSets, the counts of each maker in it
 constexpr int kMakerSets = 64;
-std::atomic<int> maker_count[5] = {kMakerSets, 0, 0, 0, 0};   // (by FgMaker)
+std::atomic<int> maker_count[6] = {kMakerSets, 0, 0, 0, 0, 0};   // (by FgMaker)
 uint8_t maker_ring[kMakerSets] = {};
 int maker_pos = 0;
 std::atomic<int64_t> maker_at{0};
@@ -1124,13 +1147,19 @@ int framegen_now() { return framegen_capped(opts.framegen, dlss_fg_most()); }
 FgMaker framegen_maker() {
     // (none recorded for half a second: Frame generation off, or the window's presents without it)
     if (now_ns() - maker_at.load(std::memory_order_relaxed) > 500000000) return FgMaker::None;
-    const int b = maker_count[(int)FgMaker::BuiltIn].load(std::memory_order_relaxed);
-    const int d = maker_count[(int)FgMaker::Dlss].load(std::memory_order_relaxed);
-    const int f = maker_count[(int)FgMaker::Fsr3].load(std::memory_order_relaxed);
-    const int p = maker_count[(int)FgMaker::DlssPaused].load(std::memory_order_relaxed);
-    if (!b && !d && !f && !p) return FgMaker::None;
-    if (p > b && p > d && p > f) return FgMaker::DlssPaused;
-    return d >= b && d >= f ? FgMaker::Dlss : f >= b ? FgMaker::Fsr3 : FgMaker::BuiltIn;
+    // (who made the most of them; on a tie DLSS-G, then FSR 3.1, then the console's network, then the renderer's own, then DlssPaused)
+    FgMaker best = FgMaker::None;
+    int most = 0;
+    for (FgMaker m : {FgMaker::Dlss, FgMaker::Fsr3, FgMaker::Mihawk, FgMaker::BuiltIn, FgMaker::DlssPaused})
+        if (const int c = maker_count[(int)m].load(std::memory_order_relaxed); c > most) most = c, best = m;
+    return best;
+}
+
+bool framegen_by_missing() {   // (the menu's thread: a flag and a pointer the replay thread sets, read as they are)
+#ifdef HOOKSHOT_MIHAWKGEN
+    if (fg.by == fg_by::kMihawk) return neural.tried && !neural.ctx;
+#endif
+    return false;
 }
 
 // The Insert menu's Frame generation is off at 0. While it was ignored, every present still copied the frame and
@@ -1626,6 +1655,7 @@ bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t
             n = 1, t[0] = 1.0f, at[0] = now, fg.slot_next = now + period;
         }
         bool flow = false, neural_made = false;
+        FgMaker who = FgMaker::None;   // (the console's generator that made them)
 #ifdef HOOKSHOT_MIHAWKGEN
         if (blend) {   // (PS5_MihawkGen's network makes them where it can: neural_frames)
             float nt[kMaxMult];
@@ -1633,7 +1663,7 @@ bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t
             int made = 0;
             for (int k = 0; k < n; k++)
                 if (t[k] <= 0.999f) nt[made] = t[k], out[made++] = set->frame[k].view;
-            neural_made = neural_frames(cmd, (int)(set - fg.sets), prev, cur, made, nt, out);
+            if (neural_frames(cmd, (int)(set - fg.sets), prev, cur, made, nt, out)) neural_made = true, who = FgMaker::Mihawk;
         }
 #endif
         // (longshot) AMD FSR 3.1's frame interpolation where it is asked (vk_fsr3fi.h): each made frame at its refresh's
@@ -1670,7 +1700,7 @@ bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t
         }
         set->shown = n;
         set->made = n > 0 && !set->game[n - 1] ? n : std::max(0, n - 1);   // (for framegen_made_image: any made)
-        note_maker(fsr ? FgMaker::Fsr3 : (flow || neural_made) ? FgMaker::BuiltIn : FgMaker::None);   // (Auto: DLSS-G is not asked)
+        note_maker(fsr ? FgMaker::Fsr3 : flow ? FgMaker::BuiltIn : who);   // (Auto: the renderer's own or the console's, DLSS-G is not asked)
         full_barrier(cmd);
         fg.have_prev = true;
         fg.cur = prev;
@@ -1697,7 +1727,8 @@ bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t
         float nt[kMaxMult];
         VkImageView out[kMaxMult];
         for (int k = 1; k < m; k++) nt[k - 1] = (float)k / (float)m, out[k - 1] = set->frame[k - 1].view;
-        if (neural_frames(cmd, (int)(set - fg.sets), prev, cur, m - 1, nt, out)) set->made = m - 1, maker = FgMaker::BuiltIn;
+        if (neural_frames(cmd, (int)(set - fg.sets), prev, cur, m - 1, nt, out))
+            set->made = m - 1, maker = FgMaker::Mihawk;
     }
 #endif
     // (longshot) Where DLSS-G did not make them, AMD FSR 3.1's frame interpolation where it is asked (vk_fsr3fi.h): the set's

@@ -15,11 +15,14 @@ struct Options {
 #else
     int framegen = 0;
 #endif
-    int framegen_by = 0;  // (longshot) who makes them at 2x and up: 0 DLSS FG (NVIDIA DLSS Frame Generation), 1 Built-in FG
+#ifdef __PROSPERO__
+    int framegen_by = 3;  // (fg_by::kDefault: PS5_MihawkGen's network)
+#else
+    int framegen_by = 0;
+#endif
+                          // (longshot) who makes them at 2x and up: 0 DLSS FG (NVIDIA DLSS Frame Generation), 1 Built-in FG
                           // (the renderer's own, vk_framegen.cpp; vk_dlss.cpp dlss_fg_wanted), 2 FSR 3.1 FG (AMD FSR 3.1's
-                          // frame interpolation, vk_fsr3fi.cpp asked). At 0, FSR 3.1 makes what DLSS-G does not (Frame
-                          // generation's Auto); where DLSS-G cannot run, 0 is FSR 3.1 FG and the row has it and Built-in FG.
-                          // An options file's 0 from before was Auto, DLSS FG where it runs: the same default
+                          // frame interpolation, vk_fsr3fi.cpp asked), 3 PS5_MihawkGen's network (fg_by.h)
     int pace = 0;         // frames shown on an even line (vk_framegen.cpp)
     int vsync = 0;        // (longshot) V-Sync, the swapchain's present mode (vk_main.cpp create_swapchain, made again at once): 0 Auto
                           // (mailbox where the driver has it), 1 On (FIFO), 2 Off (immediate). RX_VK_FIFO / RX_VK_IMMEDIATE over it
