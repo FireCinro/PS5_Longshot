@@ -578,6 +578,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   A cap **past 60 is experimental**: the game keeps real time, but some cutscenes and bosses still count frames and can
   misbehave (the intro's narration running ahead: #1742). 60 is the safe choice.
   Gohma's ceiling-positioning fault is fixed, tested in complete fights at about 98-99 FPS and at 60.
+  The frozen Zoras under the ice in Zora's Domain stand as still above 60 as at 60 (they twitched: #988).
   Scarecrow's Song keeps the timing of its eight-note recording and playback above 60. Saved songs are not retimed;
   re-record a song after updating if its recorded rhythm was lost.
   Epona jumps fences above 60 as she does at 60 (she had galloped through them, more often the higher the cap).
