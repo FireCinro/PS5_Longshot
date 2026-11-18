@@ -20,6 +20,9 @@
 #include <cmath>
 
 #include "vk_framegen.h"
+#ifdef TRACY_ENABLE
+#include "../../host/hos_tracy.h"   // (LONGSHOT_TRACY: the profiler's zones; nothing in any other build)
+#endif
 #include "vk_antilag.h"   // (AMD Anti-Lag 2: which game frame a set shows, antilag_frame / antilag_present_frame)
 #include "vk_dlss.h"   // (NVIDIA DLSS Frame Generation through NGX: dlss_fg_frames)
 #include "vk_reflex.h"   // (NVIDIA Reflex: which game frame a set shows, reflex_frame / reflex_present_frame)
@@ -732,6 +735,9 @@ static bool present_ahead_wanted(bool pace, int shown, uint32_t spare) {
 
 void display_main() {
     SetThreadDescription(GetCurrentThread(), L"mkw_vk display");
+#ifdef TRACY_ENABLE
+    HT_THREAD_NAME("mkw_vk display");
+#endif
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
     int64_t interval = 16666667, last_at = 0;
     // (by_time: sets on the game's timeline; early: those of them taken while the set before was shown; waited: those whose

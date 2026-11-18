@@ -40,6 +40,9 @@
 #include "vk_paths.h"
 #include "pipeline_cache_file.h"
 #include "vk_draw.h"
+#ifdef TRACY_ENABLE
+#include "../../host/hos_tracy.h"   // (LONGSHOT_TRACY: the profiler's zones; nothing in any other build)
+#endif
 #include "draw_key.h"     // (the draw path's questions answered from their arguments alone: pipe_same, dyn_same, ...)
 #include "flat_map.h"
 #include "vk_menu.h"          // (opts.anisotropy: the Anisotropic filtering row; resolution_scale)
@@ -1386,6 +1389,9 @@ VkResult intel_gate_busy() {
     return VK_PIPELINE_COMPILE_REQUIRED;
 }
 VkResult cached_graphics(const VkGraphicsPipelineCreateInfo* ci, VkPipeline* pl) {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("cached_graphics (pipeline compile)");
+#endif
     IntelDriverGate gate(compiles_nothing(ci->flags));
     if (gate.busy) return intel_gate_busy();
     return create_cached(guarded_graphics_held, ci, pl);
@@ -1653,6 +1659,9 @@ private:
     std::list<ComputeCompiling>::iterator mine;
 };
 VkResult cached_compute(const VkComputePipelineCreateInfo* ci, VkPipeline* pl) {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("cached_compute (pipeline compile)");
+#endif
     // (the turn first, Intel's lock inside it: a worker that held the lock while it waited for a turn would block the compiles
     // that have theirs, and those hold the memory it waits for)
     const ComputeTurn turn(*ci);
@@ -2501,6 +2510,9 @@ void gpl_build_cold(const Program& p, const NvnState& s, const Targets& at, VkPr
 }
 /// cold: the keys of the pre-rasterization and fragment libraries this call found cold (0: not)
 VkPipeline gpl_link(const Program& p, const NvnState& s, const Targets& at, VkPrimitiveTopology topo, uint64_t cold[2]) {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("gpl_link (pipeline)");
+#endif
     if (at.n < 0 || at.n > 8) return VK_NULL_HANDLE;   // (longshot: at most 8 colour targets)
     const uint64_t program = mix(p.key, p.variant);
     uint64_t input = (uint64_t)topology_class(topo) + 1;
@@ -2732,6 +2744,9 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
 /// shader, 3 fragment output
 /// cold: made only if the driver has it compiled already; set, and nothing made, when it would have had to compile
 VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at, VkPrimitiveTopology topo, int part, bool* cold) {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("build_graphics (pipeline)");
+#endif
     if (at.n < 0 || at.n > 8 || program_modules_dropped(p)) return VK_NULL_HANDLE;   // (longshot: at most 8 colour targets)
     const Shader::Info& vs = *vertex_info(p);
     const auto t0 = std::chrono::steady_clock::now();
@@ -4124,6 +4139,9 @@ void dump_ssbos(VkCommandBuffer cmd, const Program& p, const char* when) {
 }
 
 void build_descriptors(const NvnState& s, const Program& p) {
+#ifdef TRACY_ENABLE
+    HT_SCOPE_DRAW("build_descriptors");
+#endif
     // (longshot) the thread's writer asked for once: each dw() is a thread-local lookup, a call in a shared library, and a
     // build made dozens of them
     const UbReadsScope ub_reads;   // (the uniform copies' reads made together when the build is over: ub_read_batch_mode)
@@ -4640,6 +4658,9 @@ extern uint64_t mesh_args_address;
 namespace {
 
 bool bind_descriptors(VkCommandBuffer cmd, VkPipelineBindPoint bp, const Program& p) {
+#ifdef TRACY_ENABLE
+    HT_SCOPE_DRAW("bind_descriptors");
+#endif
     DescWriter& wr = dw();   // (once: the accessor is a call and a thread-local read at each use. The same object for the thread's life: build_descriptors resets it in place)
     if (wr.writes.empty()) return true;
     // A failed sampler is retryable, but cannot be published to either descriptor path.
@@ -5787,6 +5808,9 @@ uint16_t draw_hazards(VkCommandBuffer cmd, const Program& p, const NvnState& s, 
 } // namespace
 
 void clear_color_target(VkCommandBuffer cmd, NvnState& s, int index, const float rgba[4], uint32_t mask) {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("clear_color_target");
+#endif
     ParLock lk;
     mask &= 0xF;
     if (!mask) return;
@@ -7829,6 +7853,9 @@ static bool fallback_list_held(uint64_t list) {
 }
 
 void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
+#ifdef TRACY_ENABLE
+    HT_SCOPE_DRAW("draw");
+#endif
     Pass& ps = pass();   // (once: the accessor is a call and a thread-local read at each use. The same object for the thread's life: draw_begin_recording resets it in place)
     CmdBound& cb = bound();   // (once, as the pass: what the command buffer has bound)
     PROF_HOT(PROF_DRAW);
@@ -7860,6 +7887,9 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     {
         PROF_HOT(PROF_PROGRAM);
         ParLock lk(d.mesh);   // (graphics programs: each thread's picks, program_pick's own lock)
+#ifdef TRACY_ENABLE
+        HT_SCOPE_DRAW("program_for");   // (here, not in vk_shader.cpp: that file is part of the shader caches' stamp)
+#endif
         cp = program_for(s, d.mesh ? ProgramKind::Mesh : ProgramKind::Graphics, types);
     }
     if (use.on) use.program(cp, cp && cp->ready.load(std::memory_order_acquire));

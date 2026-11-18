@@ -28,6 +28,9 @@
 #include <windows.h>
 
 #include "vk_internal.h"
+#ifdef TRACY_ENABLE
+#include "../../host/hos_tracy.h"   // (LONGSHOT_TRACY: the profiler's zones; nothing in any other build)
+#endif
 #include "vk_new.h"   // (NewNothrow)
 #include "readback_early.h"  // (RX_VK_READBACK_EARLY's and RX_VK_LATE_DEFER's rules)
 #include "vk_texture.h"   // (upload_command_buffer)
@@ -584,6 +587,9 @@ void memory_table_begin() {
 // (at the end of the recording's uploads: the changes, the last one for each page, as transfers into the table; the
 // upload command buffer's barriers order them after the work submitted before and before this submission's)
 bool memory_table_flush() {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("memory_table_flush");
+#endif
     table_defer = false;
     if (table_pending.empty()) return false;
     std::vector<std::pair<uint64_t, uint64_t>> pages;   // (page, value), in the order they were set
@@ -672,6 +678,9 @@ void page_table_census_log(const char* when) {
 std::atomic<int64_t> memsync_lock_wait_ns{0};
 std::atomic<int64_t> memsync_part_ns[3];
 void memory_sync() {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("memory_sync");
+#endif
     static std::mutex sync_mu;   // (called from every thread that touches memory)
     const auto w0 = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> sync_lk(sync_mu);
@@ -1954,6 +1963,9 @@ std::unique_ptr<Capture> capture_make();
 void shadow_free(Pool& p);
 void shadow_forget(Pool& p, uint64_t at, uint64_t len);   // (the write-back's diff, below: a range its shadow no longer knows)
 void memory_capture_submit() {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("memory_capture_submit");
+#endif
     std::unique_ptr<Capture> c = capture_make();
     if (!c) return;
     std::lock_guard lk(cap_mu);
@@ -1971,6 +1983,9 @@ int64_t capture_scan(const std::vector<std::pair<uint64_t, uint64_t>>& ranges, u
 /// (the pages the CPU wrote since the last capture, copied now: a submit's capture, or memory_capture_now's)
 uint64_t memory_captures_begun() { return captures_begun.load(std::memory_order_acquire); }
 std::unique_ptr<Capture> capture_make() {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("capture_make");
+#endif
     if (!capture_on()) return nullptr;
     captures_begun.fetch_add(1, std::memory_order_release);   // (before the written pages are collected: memory_captures_begun)
     const auto t0 = std::chrono::steady_clock::now();
@@ -2674,6 +2689,9 @@ LateFixTable* late_fix_table_get(uint64_t bytes) {   // (a ring: one is taken ag
 }
 // (pools_mu held) the fixes of a capture's late pages, or false: it waits, as before
 bool late_fix_build(Capture& c) {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("late_fix_build");
+#endif
     st_lf_takes++;
     if (!late_fix_pipe_ready() || !c.buffer) return false;
     VkBufferDeviceAddressInfo da{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
@@ -3061,6 +3079,9 @@ uint64_t late_defer_split(const Capture& c, std::vector<uint32_t>& out, std::vec
     return wait;
 }
 bool take_capture(std::unique_ptr<Capture> c, uint64_t value, uint64_t completed) {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("take_capture");
+#endif
     const auto tk0 = std::chrono::steady_clock::now();
     bool fixed = false;   // (the late pages fixed on the GPU, no wait: late_fix_take)
     static thread_local std::vector<uint32_t> deferred;   // (indices into c->pages: late pages left to their reads)
@@ -3262,6 +3283,9 @@ bool memory_take_capture(uint64_t value, uint64_t completed) {
 /// (longshot) A capture made and taken at once, for a submission going on from a wait the CPU's signal met
 /// (vk_replay.cpp resume_queue): the CPU's writes up to that signal, which the console's GPU reads after its wait
 bool memory_capture_now(uint64_t value, uint64_t completed) {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("memory_capture_now");
+#endif
     if (completed > mem_completed) mem_completed = completed;
     std::unique_ptr<Capture> c = capture_make();
     return c && take_capture(std::move(c), value, completed);
@@ -4156,6 +4180,9 @@ void append_capture_copy(std::vector<VkBufferCopy>& runs, const VkBufferCopy& ne
 
 /// The pages of the pool the CPU wrote since its mirror's sync, copied in (the upload command buffer)
 void mirror_sync(Pool& p) {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("mirror_sync");
+#endif
     late_fix_emit();   // (the late pages' fix, before this copies out of a capture's buffer)
     p.synced_epoch = mirror_epoch;
     p.sync_seg = texture_segment();
@@ -5501,6 +5528,9 @@ void memory_sync_mirrors_before_segments() {
 /// as they were at their submit (pools_mu held). False over the budget (tried again when next bound, as mirrors are
 /// given back) or over 1 GB (never)
 bool mirror_make(Pool& pool) {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("mirror_make");
+#endif
     Pool* p = &pool;
     if (mirror_epoch < p->retry_epoch) {   // (longshot: its VRAM refused not long ago; wanted again at a later binding)
         if (p->mstate == Pool::MIRROR_WANTED) p->mstate = Pool::MIRROR_NONE;
@@ -6834,6 +6864,9 @@ bool msync_pass_add(Pool& p, VkBuffer buf, const std::vector<VkBufferCopy>& rs) 
 
 /// (pools_mu held) The chunks taken since as one dispatch in the upload command buffer, or as their copies when no table has room
 void msync_pass_flush() {
+#ifdef TRACY_ENABLE
+    HT_SCOPE("msync_pass_flush");
+#endif
     if (msync_chunks.empty()) {
         msync_copies.clear();
         return;
