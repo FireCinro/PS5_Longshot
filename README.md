@@ -563,11 +563,11 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   from the scene's depth and motion; below), the default everywhere else; **Built-in FG**, the renderer's own. **Frame pacing** shows frames at an even interval: less stutter, up to one frame of delay. It paces
   the frames that frame generation shows, so it has no effect while Frame generation is Off. A fixed multiplier shows each
   frame at its own time on the game's timeline whether Frame pacing is On or Off (with V-Sync On one a refresh at most;
-  where the window's swapchain holds all of a set's frames at once: up to 6x on an NVIDIA card). With NVIDIA's driver
-  621.24 or newer on Windows the presents have a queue of their own, so no made frame waits behind the game's next frame;
-  if the screen goes black or the GPU is lost with it (Hookshot issue 1161, before the fork: an RTX 4090 on 621.14), put
-  `RX_VK_PRESENT_QUEUE=0` in `longshot_env.txt` and tell us your card and driver. Other drivers can try it with
-  `RX_VK_PRESENT_QUEUE=1`.
+  where the window's swapchain holds all of a set's frames at once: up to 6x on an NVIDIA card). For the most even of those
+  frames, put `RX_VK_PRESENT_QUEUE=1` in `longshot_env.txt`: the presents then get a queue of their own, and no made frame
+  waits there behind the game's next frame. It is off by default: on some cards it loses the GPU with frame generation on
+  (an RTX 5080 on NVIDIA's 621.24; an RTX 4090 had a black screen, Hookshot issue 1161, before the fork). If the game
+  crashes or the screen goes black with it, take the line out.
 - **Game frame rate cap** limits the frames the game renders. With a cap of 60 and Frame generation at 2x, the output
   can reach 120 FPS. Choose **Auto** in Frame generation to target the display's refresh rate instead of a fixed multiplier.
   A cap **past 60 is experimental**: the game keeps real time, but some cutscenes and bosses still count frames and can
