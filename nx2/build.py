@@ -743,7 +743,7 @@ def chunk_opt_o2(gen):
                 continue
             with open(os.path.join(gen, name), "rb") as f:
                 text = f.read()
-            if any(m.group(1) in want for m in lifted_c.HEAD_BYTES.finditer(text)):
+            if any(m.group(1) in want for m in lifted_c.definitions(text)):
                 chunks.add(name)
     return chunks
 
@@ -930,7 +930,7 @@ def rss_mb(proc):
 def largest_function(text):
     """The largest function of a lifted file's text, in bytes: each function from the newline before its definition, as mem_need
     was first measured; a giant's pieces are functions of their own (split_giants.py, the copy compile_one compiles)"""
-    starts = [m.start() - 1 for m in lifted_c.HEAD_BYTES.finditer(text)]
+    starts = [m.start() - 1 for m in lifted_c.definitions(text)]
     i = text.find(b"\nstatic __attribute__((noinline)) uintptr_t s_")
     while i >= 0:
         starts.append(i)

@@ -28,6 +28,7 @@ build's last step, the shaders' preparation, was skipped or failed and is left t
 """
 import argparse
 import contextlib
+from concurrent.futures import ThreadPoolExecutor
 import errno
 import filecmp
 import hashlib
@@ -2595,6 +2596,34 @@ def spinning_disk(folder):
     return _disk.spinning(folder)
 
 
+def overlap_package_read(jobs, package_stat, out, work, kept, romfs):
+    """A large first unpack can feed the lift while the archive's remaining files are extracted."""
+    if jobs <= 1 or package_stat.st_size < 1 << 30 or os.path.lexists(kept) or os.path.lexists(romfs):
+        return False
+    from build import free_mb
+    # The reader keeps its directory tables while the lift holds the decoded functions.
+    # Leave small-memory machines and known spinning drives on the sequential path.
+    return (free_mb() or 0) >= 8192 and not any(spinning_disk(folder) for folder in (out, work))
+
+
+def package_identity(st):
+    return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns
+
+
+@contextlib.contextmanager
+def clean_incomplete_unpack(game):
+    try:
+        yield
+    except (OSError, SystemExit):
+        try:
+            shutil.rmtree(game)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            print("Could not remove the incomplete extraction at %s (%s)." % (game, e), flush=True)
+        raise
+
+
 def warn_slow_disk(*folders):
     """A build reads and writes tens of gigabytes, and on a hard drive it takes much longer than on an SSD. Say so, and build
     anyway: the player may have no other folder with the room. Said once, for the first folder on a hard drive."""
@@ -2803,6 +2832,7 @@ def main(a=None):
     exefs = os.path.join(work, "exefs")
     romfs = os.path.join(out, "romfs")
 
+    remaining_assets = None
     say("stage", "read", "Reading your game files")
     clear_folder(exefs)
     kept = os.path.join(out, ".longshot_exefs")   # (the game's code as read, kept in the folder: what an update builds from again)
@@ -2843,33 +2873,47 @@ def main(a=None):
                 os.remove(os.path.join(out, ".longshot_romfs_checked"))
             # Keep the last usable cache until the new package has been read and validated.
             staged_exefs = os.path.join(game, "exefs")
-            try:
-                run(PY + ["nx2/nup.py", a.nup, "--extract", game])
-                check_modules(staged_exefs)
-                check_supported_build(staged_exefs)
-                if not os.path.isdir(os.path.join(game, "romfs")):
-                    fail("The package did not contain a romfs folder.")
-                check_unpacked_romfs(os.path.join(game, "romfs"), "Your .nup file %s" % a.nup)
-            except (OSError, SystemExit):
-                try:
-                    shutil.rmtree(game)
-                except FileNotFoundError:
-                    pass
-                except OSError as e:
-                    print("Could not remove the incomplete extraction at %s (%s)." % (game, e), flush=True)
-                raise
-            if os.path.exists(romfs):
-                shutil.rmtree(romfs)
-            shutil.move(os.path.join(game, "romfs"), romfs)
-            keep_heads(out, game, stamp)
-            shutil.move(staged_exefs, exefs)
-            shutil.rmtree(game, ignore_errors=True)
-            shutil.rmtree(kept, ignore_errors=True)
-            shutil.copytree(exefs, kept)
-            write_stamp(good, stamp + chr(10))
+            overlap = overlap_package_read(a.jobs, st, out, work, kept, romfs)
+            extract = PY + ["nx2/nup.py", a.nup, "--extract", game]
+
+            def read_assets():
+                with clean_incomplete_unpack(game):
+                    run(extract + (["--only", "romfs"] if overlap else []))
+                    if overlap:
+                        if package_identity(os.stat(a.nup)) != package_identity(st):
+                            fail("The game package changed during extraction. Start the build again with the complete package.")
+                    else:
+                        check_modules(staged_exefs)
+                        check_supported_build(staged_exefs)
+                    staged_romfs = os.path.join(game, "romfs")
+                    if not os.path.isdir(staged_romfs):
+                        fail("The package did not contain a romfs folder.")
+                    check_unpacked_romfs(staged_romfs, "Your .nup file %s" % a.nup)
+                    if overlap and (os.path.lexists(romfs) or os.path.lexists(kept)):
+                        fail("Another build populated this game folder while its assets were being extracted.")
+                if not overlap and os.path.exists(romfs):
+                    shutil.rmtree(romfs)
+                shutil.move(staged_romfs, romfs)
+                keep_heads(out, game, stamp)
+                if not overlap:
+                    shutil.move(staged_exefs, exefs)
+                shutil.rmtree(game, ignore_errors=True)
+                shutil.rmtree(kept, ignore_errors=True)
+                shutil.copytree(exefs, kept)
+                write_stamp(good, stamp + chr(10))
+
+            if overlap:
+                with clean_incomplete_unpack(game):
+                    run(extract + ["--only", "exefs"])
+                    check_modules(staged_exefs)
+                    check_supported_build(staged_exefs)
+                    shutil.move(staged_exefs, exefs)
+                remaining_assets = read_assets
+            else:
+                read_assets()
         check_modules(exefs)
-        # (also when the .nup was read before: a folder built from a 23.3 GB dump by an earlier builder gets them too)
-        stand_in_damaged_files(out, romfs)
+        if not remaining_assets:
+            stand_in_damaged_files(out, romfs)
     else:
         check_cache_paths(out, (kept, romfs))
         refuse_dump_links(a.exefs)
@@ -2982,7 +3026,17 @@ def main(a=None):
             fail("The translated game came out cut short twice (%s). Check that the drive with %s has free space, and that no antivirus "
                  "and no second Longshot Builder is working in that folder, then update again." % (", ".join(cut[:6]), work))
 
-    translate()
+    if remaining_assets:
+        print("Reading the remaining game assets alongside translation.", flush=True)
+        with ThreadPoolExecutor(max_workers=1) as reader:
+            assets = reader.submit(remaining_assets)
+            try:
+                translate()
+            finally:
+                assets.result()
+        stand_in_damaged_files(out, romfs)
+    else:
+        translate()
 
     # (the compile's timer: build.py reads the record of the earlier builds on this PC, says which files this run really
     # rebuilds and how long the rest will take, and reports each module's seconds; they go into the record below)
