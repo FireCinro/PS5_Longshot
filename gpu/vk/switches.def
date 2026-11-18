@@ -570,7 +570,7 @@ SW(RX_VK_PROTECT_BARE, attempt, bool, "off", "1 keeps the GPU's version of pages
 SW(RX_VK_PSYCHOV35_DLSS, kill, bool, "on: compatible engines take Native PsychoV35's RGBA16F scene", "=0 disables the Native PsychoV35 HDR route for the upscalers, for troubleshooting.")
 SW(RX_VK_PTR_DIAG, diag, bool, "off: no lines", "Logs a line for each program whose global memory accesses are not all plain constant buffer pointers.")
 SW(RX_VK_PUSH_ALL, kill, bool, "off: only changed bindings are pushed", "Pushes every descriptor binding at every draw, as before.")
-SW(RX_VK_QUICK_MS, attempt, float, "off (0: no quick pipelines)", "Milliseconds a frame each recording thread may spend on quick pipeline builds for draws still waiting.")
+SW(RX_VK_QUICK_MS, attempt, string, "required (0: off)", "Milliseconds per frame for quick pipeline builds on each recording thread, or required to enable them only for draws that must wait.")
 SW(RX_VK_REACTIVE, attempt, bool, "off", "Builds a reactive mask for DLSS and FSR 3.1 from the scene's blended draws.")
 SW(RX_VK_REACTIVE_DEBUG, diag, bool, "off", "Shows the reactive mask as a debug picture.")
 SW(RX_VK_REACTIVE_MAX, tune, float, "0.9", "Upper limit of the reactive mask's values (0 to 1).")

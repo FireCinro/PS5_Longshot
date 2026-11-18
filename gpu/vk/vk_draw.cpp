@@ -1391,6 +1391,7 @@ bool compiles_nothing(VkPipelineCreateFlags flags) { return (flags & VK_PIPELINE
 /// Counted and logged (the first 8, then at each power of two), so the Intel runs show how often it happens
 std::atomic<int64_t> st_intel_gate_busy{0};
 VkResult intel_gate_busy() {
+    gate_busy = true;   // quick_pipeline can retry when the compiler is free
     const int64_t n = ++st_intel_gate_busy;
     if (n <= 8 || (n & (n - 1)) == 0)
         logf("vk: asked cold: Intel's gate busy (a worker compiles); left to a worker, %lld so far", (long long)n);
@@ -1674,7 +1675,7 @@ VkPipeline compute_pipeline_cached(const Program& q, bool noopt) {
 /// (a graphics pipeline made with the cache chosen for it: pcache through the play caches, another or none as it is)
 VkResult graphics_with(VkPipelineCache cache, const VkGraphicsPipelineCreateInfo* ci, VkPipeline* pl) {
     if (cache && cache == pcache) return cached_graphics(ci, pl);
-    IntelDriverGate gate(compiles_nothing(ci->flags));
+    IntelDriverGate gate(quick_build || compiles_nothing(ci->flags));
     if (gate.busy) return intel_gate_busy();
     return guarded_graphics_held(cache, ci, pl);
 }
@@ -3027,9 +3028,17 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
 }
 
 /// (longshot) RX_VK_QUICK_MS, read once and logged: quick_pipe.h
-double quick_budget_ms() {
+double quick_budget_ms(bool must = false) {
+    static const char* setting = getenv("RX_VK_QUICK_MS");
+    static const bool required_only = [] {
+        if (setting && strcmp(setting, "required") != 0) return false;
+        logf("vk: quick pipelines only for draws that must wait (RX_VK_QUICK_MS=required)");
+        return true;
+    }();
+    // take() exempts mandatory draws from the frame budget. A positive value enables that path.
+    if (required_only) return must ? quick_pipe::kQuickSuggestedMs : 0;
     static const double ms = [] {
-        const char* e = getenv("RX_VK_QUICK_MS");
+        const char* e = setting;
         bool bad = false;
         const double v = quick_pipe::quick_ms(e, &bad);
         if (bad)
@@ -3061,7 +3070,7 @@ double pipe_wait_budget_ms() {
 /// into no cache, set as the entry's pipeline and not ready: the worker's full build replaces it. At most RX_VK_QUICK_MS a frame
 /// on each recording thread, but for a draw that cannot be left out (must). true: the entry has one to draw with
 bool quick_pipeline(PipeEntry& e, const Program& p, const NvnState& s, const Targets& at, VkPrimitiveTopology topo, bool must) {
-    const double budget_ms = quick_budget_ms();
+    const double budget_ms = quick_budget_ms(must);
     if (budget_ms <= 0 || program_modules_dropped(p)) return false;
     static thread_local quick_pipe::FrameBudget budget;
     const auto now_ms = [] {
@@ -3079,6 +3088,8 @@ bool quick_pipeline(PipeEntry& e, const Program& p, const NvnState& s, const Tar
     };
     double quick_took = 0;
     const auto build = [&](bool& busy) -> VkPipeline {
+        // Unoptimized native task/mesh shaders can reset RADV during a load (issue 1000).
+        if (dev.driver_id == VK_DRIVER_ID_MESA_RADV && p.mesh && !p.fallback) return VK_NULL_HANDLE;
         const double t0 = now_ms();
         gate_busy = false;
         const quick_pipe::Raise quick(quick_build);
