@@ -2647,10 +2647,12 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
     PipeEntry* e = pipelines.emplace(key, std::make_unique<PipeEntry>()).first->second.get();
     if (kept_ready_n.load(std::memory_order_acquire)) {   // (made at its program's create call: ready, as one the precompile built)
         VkPipeline kept = VK_NULL_HANDLE;
+        bool deferred = false;
         {
             std::lock_guard kl(kept_ready_mu);
             if (const auto k = kept_ready.find(key); k != kept_ready.end()) {
                 kept = k->second;
+                deferred = !kept;
                 kept_ready.erase(k);
                 kept_ready_n.store(kept_ready.size(), std::memory_order_release);
             }
@@ -2660,6 +2662,17 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
             e->ready.store(true, std::memory_order_release);
             census.pipes_taken++;
             return remember(e);
+        }
+        // The loader yielded this noted state to first use. Try its cache before queuing a build.
+        if (deferred && dev.vk13.pipelineCreationCacheControl) {
+            bool cold = false;
+            const quick_pipe::Raise asking(ask_start_first);
+            if (const VkPipeline pl = build_graphics(p, s, at, topo, -1, &cold)) {
+                e->pipeline = pl;
+                e->ready.store(true, std::memory_order_release);
+                return remember(e);
+            }
+            census.load_pipes_cold++;
         }
     }
     use_counters.pipes_new++, census.play_pipes_new++;
@@ -11556,11 +11569,18 @@ VkPipeline compute_pipeline_by_module_id(const Program& p, const uint8_t* id, ui
     ask_start_first = false;
     return made ? pl : VK_NULL_HANDLE;
 }
+void pipeline_defer(uint64_t key) {
+    std::lock_guard lk(kept_ready_mu);
+    kept_ready.try_emplace(key, VK_NULL_HANDLE);
+    kept_ready_n.store(kept_ready.size(), std::memory_order_release);
+}
 bool pipeline_keep_ready(uint64_t key, VkPipeline pl) {
     if (!pl) return false;
     {
         std::lock_guard lk(kept_ready_mu);
-        if (kept_ready.emplace(key, pl).second) {
+        auto [it, inserted] = kept_ready.try_emplace(key, pl);
+        if (inserted || !it->second) {
+            it->second = pl;
             kept_ready_n.store(kept_ready.size(), std::memory_order_release);
             return true;
         }
