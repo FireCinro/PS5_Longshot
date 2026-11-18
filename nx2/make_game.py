@@ -3335,6 +3335,10 @@ def main(a=None):
             reports, issue = _addresses.address("crash_reports"), _addresses.address("crash_issue")
             if reports.startswith("https://") and issue.startswith("https://"):
                 f.write("crash_reports=%s\ncrash_issue=%s\n" % (reports, issue))
+            # (the game sends its own perf summaries to this address; the launcher only configures it, as for crash reports)
+            perf = _addresses.address("perf_reports")
+            if perf.startswith("https://"):
+                f.write("perf_reports=%s\n" % perf)
     PHASES.part("pipeline lists, icon and stamps")
     # (the game's code as read: written again by every build, so not left behind in the work folder. The translated code (sa\gen)
     # and the compiled objects stay: the next build skips the lift when nothing it reads changed (#428) and compiles only what

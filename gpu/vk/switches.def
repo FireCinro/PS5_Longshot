@@ -537,6 +537,7 @@ SW(RX_VK_PCACHE_FETCH_LOCK, hw, bool, "on for Intel on Windows, off elsewhere (o
 SW(RX_VK_PCACHE_LOAD, hw, bool, "read, except on Linux with NVIDIA's driver, 20 GB of RAM or less and NVIDIA's own shader cache on and warm...", "0 never reads or saves the pipeline cache file and its play files; 1 reads it whatever the automatic rule says.")
 SW(RX_VK_PEEK_PROG, diag, string, "unset: nothing logged", "Logs the first words of the storage buffers of programs matching a key prefix, 60 lines.")
 SW(RX_VK_PERF_INTERVAL, tune, int, "300 s between summaries", "Seconds of play between two performance summaries (60 to 840) while Send performance statistics is on.")
+SW(RX_VK_PERF_TEST_CURL, diag, string, "off: the system's curl", "In a test build, sends the summaries to this stand-in instead of curl (gpu/vk/perf_report.cpp).")
 SW(RX_VK_PER_QUEUE_FENCES, kill, bool, "on: a fence waits for its own queue's work", "=0 makes a fence wait for every queue's work up to it, stopped work forced on, as before.")
 SW(RX_VK_PGO_FILE, diag, string, "no profile written (and read only by a renderer built with RX_VK_PGO=gen)", "In a counting (RX_VK_PGO=gen) renderer, names the file its branch counters are written to; <file>.reset clears them.")
 SW(RX_VK_PIPE_SKIP, kill, enum, "1: translation is waited for; a pending pipeline is skipped only for draws that write no memory on earlier...", "0 always waits for pipelines too; 2 restores the old skip of untranslated draws on persistent targets.")

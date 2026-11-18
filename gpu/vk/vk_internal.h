@@ -292,6 +292,7 @@ void memory_capture_submit();
 /// The replay of the next submit: its capture (false: none, the pages are collected now as before)
 bool memory_take_capture(uint64_t value, uint64_t completed);
 int64_t memory_late_wait_ns();   // (longshot: RX_VK_FRAME_TRACE's late_wait_ms)
+void take_shown_samples(double& sum_ms, int64_t& count);   // (present-to-shown confirmations since the last summary)
 bool memory_capture_now(uint64_t value, uint64_t completed);   // (longshot: made and taken at once)
 uint64_t memory_captures_begun();   // (longshot: how many captures have been begun so far; any thread)
 // (RX_VK_MEM_CHECK=1, mem_check.h: off, each returns at once) the number of the capture this thread's last
