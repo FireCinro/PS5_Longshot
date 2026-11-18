@@ -1,5 +1,5 @@
-"""The presents on a queue of a compute family of their own only when RX_VK_PRESENT_QUEUE asks for it (off by default on
-every PC).
+"""The presents on a queue of a compute family of their own only when the Debug tab's Present queue row or
+RX_VK_PRESENT_QUEUE asks for it (off by default on every PC).
 
 On the replay's queue a present waits behind the game's next frame, so frame generation's frames, each presented at its own
 time, reached the screen together: with V-Sync Off at 3x a third of them under 2 ms after the one before (an RTX 5090 on
@@ -9,8 +9,10 @@ FG, mailbox and FIFO), and the crashes stopped with RX_VK_PRESENT_QUEUE=0 (#1491
 v2.0.9 had turned it off after an RTX 4090 on 621.14 had a black screen with it (Hookshot issue 1161). So it is opt-in again.
 
 The behaviour (gpu/vk/vk_main.cpp create_device's queue choice, cut out and compiled, its Windows branch included on any
-host): with the switch unset no family is chosen, for NVIDIA's driver 621.24 and newer too; RX_VK_PRESENT_QUEUE=1 (any on
-value) chooses the first compute family without graphics, =0 (or false, off, no) none; with no such family none.
+host): with the switch unset and no row saved no family is chosen, for NVIDIA's driver 621.24 and newer too; the row's
+present_queue=1 in longshot_options.ini (read at the start, as robust_buffers=) chooses the first compute family without
+graphics, =0 none; RX_VK_PRESENT_QUEUE over the row either way (1 or any on value: chosen; 0, false, off, no: none; empty:
+the row); with no such family none. The row: on the Debug tab, On or Off, applied after a restart, its key present_queue.
 The text checks: the device-lost message names the switch while the queue is in use, DLSS Frame Gen's exit wait bounds
 the queues' own locks too (a present on the presents' queue lets dev.present_mu go), and docs/development.md and
 gpu/vk/switches.def have the switch's row with its default.
@@ -38,12 +40,15 @@ FIXTURE = r"""
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <vector>
 #include "longshot_env.h"
 
 static VkDriverId driver_id = VK_DRIVER_ID_NVIDIA_PROPRIETARY;
 static struct { VkPhysicalDevice physical = nullptr; VkPhysicalDeviceProperties props{}; } dev;
 static void logf(const char*, ...) {}
+static std::string ini;   // (longshot_options.ini as the fixture writes it; empty: no file)
+static std::string options_path() { return ini; }
 static void vkGetPhysicalDeviceProperties2(VkPhysicalDevice, VkPhysicalDeviceProperties2* p) {
     auto* d = static_cast<VkPhysicalDeviceDriverProperties*>(p->pNext);
     if (d) d->driverID = driver_id;
@@ -60,6 +65,12 @@ static void set_env(const char* v) {
     if (v) setenv("RX_VK_PRESENT_QUEUE", v, 1); else unsetenv("RX_VK_PRESENT_QUEUE");
 #endif
 }
+static void set_ini(const char* line) {   // (nullptr: no options file)
+    static int n = 0;
+    ini = line ? std::string("present-queue-") + std::to_string(++n) + ".ini" : std::string("no-such-options-file.ini");
+    if (line)
+        if (FILE* f = std::fopen(ini.c_str(), "w")) std::fprintf(f, "vsync=0\n%s\nrobust_buffers=0\n", line), std::fclose(f);
+}
 static int fails = 0;
 static void expect(const char* what, uint32_t got, uint32_t want) {
     if (got != want) {
@@ -74,6 +85,7 @@ int main() {
     nvidia[2].queueFlags = VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT;   // (an NVIDIA GPU's: graphics, transfer, compute)
     no_compute[0].queueFlags = gfx, no_compute[1].queueFlags = VK_QUEUE_TRANSFER_BIT;
     const uint32_t none = UINT32_MAX;
+    set_ini(nullptr);
     for (uint32_t version : {(621u << 22) | (14u << 14), (621u << 22) | (24u << 14), (630u << 22)}) {
         dev.props.driverVersion = version;
         driver_id = VK_DRIVER_ID_NVIDIA_PROPRIETARY;
@@ -90,8 +102,22 @@ int main() {
     set_env("1");
     expect("AMD, the switch on", choose(nvidia), 2);
     expect("no compute-only family, the switch on", choose(no_compute), none);
+    driver_id = VK_DRIVER_ID_NVIDIA_PROPRIETARY, dev.props.driverVersion = (621u << 22) | (24u << 14);
+    set_env(nullptr);
+    set_ini("present_queue=1");
+    expect("the Debug tab's Present queue On, the switch unset", choose(nvidia), 2);
+    set_ini("present_queue=0");
+    expect("the Debug tab's Present queue Off, the switch unset", choose(nvidia), none);
+    set_ini("present_queue=1"), set_env("0");
+    expect("the row On, RX_VK_PRESENT_QUEUE=0 over it", choose(nvidia), none);
+    set_ini("present_queue=0"), set_env("1");
+    expect("the row Off, RX_VK_PRESENT_QUEUE=1 over it", choose(nvidia), 2);
+    set_ini("present_queue=1"), set_env("");
+    expect("the row On, the switch empty", choose(nvidia), 2);
+    set_ini("present_queue=1"), set_env(nullptr);
+    expect("the row On, no compute-only family", choose(no_compute), none);
     if (fails) return 1;
-    std::puts("PASS: the presents' own queue only when RX_VK_PRESENT_QUEUE asks for it");
+    std::puts("PASS: the presents' own queue only when the Present queue row or RX_VK_PRESENT_QUEUE asks for it");
     return 0;
 }
 """
@@ -113,16 +139,21 @@ def main():
         subprocess.run([a.cxx, "-std=c++20", "-O1", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
                         "-Wno-unused-parameter", "-Wno-missing-field-initializers", "-I" + str(a.headers), "-I" + str(ROOT / "gpu" / "vk" / "compat"),
                         str(cpp), "-o", str(exe)], check=True)
-        run = subprocess.run([str(exe)], capture_output=True, text=True, timeout=20)
+        run = subprocess.run([str(exe)], capture_output=True, text=True, timeout=20, cwd=tmp)
         sys.stdout.write(run.stdout)
-        assert run.returncode == 0, "create_device's queue choice: the presents' own queue only when RX_VK_PRESENT_QUEUE asks"
+        assert run.returncode == 0, "create_device's queue choice: the presents' own queue only when the Present queue row or RX_VK_PRESENT_QUEUE asks"
+    menu = (ROOT / "gpu" / "vk" / "vk_menu.cpp").read_text(encoding="utf-8")
+    row = between(menu, '{TAB_DEBUG, "Present queue", &opts.present_queue, 0, 1, 1, tx_onoff,', "},", where="gpu/vk/vk_menu.cpp")
+    assert row.rstrip().endswith("true, true"),         "the Debug tab's Present queue row: Off or On, applied after a restart (restart), the Quality preset left alone"
+    assert "int present_queue = 0;" in (ROOT / "gpu" / "vk" / "vk_menu.h").read_text(encoding="utf-8"),         "vk_menu.h: Options::present_queue, 0 Off by default"
+    assert 'if (const char* e = getenv("RX_VK_PRESENT_QUEUE"); e && *e) env_override(&opts.present_queue, !env_value_off(e));'         in menu and '(value == &opts.present_queue && getenv("RX_VK_PRESENT_QUEUE") && *getenv("RX_VK_PRESENT_QUEUE"))' in menu,         "vk_menu.cpp: with RX_VK_PRESENT_QUEUE set the row shows the switch's value and is fixed (as ASTC as RGBA8's)"
     dev = (ROOT / "docs" / "development.md").read_text(encoding="utf-8")
     row = [l for l in dev.splitlines() if l.startswith("| `RX_VK_PRESENT_QUEUE=1` |")]
     assert len(row) == 1 and "off by default on every PC" in row[0], \
         "docs/development.md: the RX_VK_PRESENT_QUEUE row and its default"
     sw = (ROOT / "gpu" / "vk" / "switches.def").read_text(encoding="utf-8")
-    assert "SW(RX_VK_PRESENT_QUEUE, attempt, bool, \"off on every PC" in sw, \
-        "gpu/vk/switches.def: an attempt, off on every PC"
+    assert "SW(RX_VK_PRESENT_QUEUE, player, bool, \"follows present_queue= in longshot_options.ini" in sw, \
+        "gpu/vk/switches.def: a player's switch over the Present queue row, off on every PC"
     replay = (ROOT / "gpu" / "vk" / "vk_replay.cpp").read_text(encoding="utf-8")
     lost = between(replay, "[[noreturn]] void device_lost(const char* why) {", "\n}\n", where="gpu/vk/vk_replay.cpp")
     assert "dev.present_queue_supported ?" in lost and "RX_VK_PRESENT_QUEUE=0" in lost and "replay_fatal(lost);" in lost, \

@@ -564,10 +564,12 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   the frames that frame generation shows, so it has no effect while Frame generation is Off. A fixed multiplier shows each
   frame at its own time on the game's timeline whether Frame pacing is On or Off (with V-Sync On one a refresh at most;
   where the window's swapchain holds all of a set's frames at once: up to 6x on an NVIDIA card). For the most even of those
-  frames, put `RX_VK_PRESENT_QUEUE=1` in `longshot_env.txt`: the presents then get a queue of their own, and no made frame
-  waits there behind the game's next frame. It is off by default: on some cards it loses the GPU with frame generation on
-  (an RTX 5080 on NVIDIA's 621.24; an RTX 4090 had a black screen, Hookshot issue 1161, before the fork). If the game
-  crashes or the screen goes black with it, take the line out.
+  frames, turn on **Present queue** on the Debug tab (or put `RX_VK_PRESENT_QUEUE=1` in `longshot_env.txt`) and restart:
+  the presents then get a queue of their own, and no made frame waits there behind the game's next frame. It is off by
+  default: on some cards it loses the GPU with frame generation on (an RTX 5080 on NVIDIA's 621.24; an RTX 4090 had a
+  black screen, Hookshot issue 1161, before the fork). If the game crashes or the screen goes black with it and you
+  cannot reach the menu, put `RX_VK_PRESENT_QUEUE=0` in `longshot_env.txt` (it overrides the row), then turn the row
+  off and take the line out.
 - **Game frame rate cap** limits the frames the game renders. With a cap of 60 and Frame generation at 2x, the output
   can reach 120 FPS. Choose **Auto** in Frame generation to target the display's refresh rate instead of a fixed multiplier.
   A cap **past 60 is experimental**: the game keeps real time, but some cutscenes and bosses still count frames and can
@@ -711,6 +713,10 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 - **Robust buffers** (Debug tab, Developer): a read past a buffer's end is dropped instead of stopping the GPU. Auto is
   on, on every card; Off can be faster on some NVIDIA cards.
 - **ASTC as RGBA8** (Debug tab, Developer): the AMD texture workaround below.
+- **Present queue** (Debug tab, Developer): the presents on a GPU queue of their own. Off by default; On makes frame
+  generation's frames more even with V-Sync Off on some cards (an RTX 5090), but lost the GPU on others with frame
+  generation on (an RTX 5080). It applies after a restart; `RX_VK_PRESENT_QUEUE` in `longshot_env.txt` or the environment
+  chooses over it at every start while it is set (the row then shows it and cannot be changed).
 - **Intel shader compiles** (Debug tab, Developer; Intel graphics on Windows only): One at a time lets one thread at a
   time into Intel's shader compiler; Side by side is faster on many cores but can crash in the driver. Auto, the default,
   is side by side on the Arc B-series with driver 101.9154 or newer, where it was measured, and one at a time elsewhere. See

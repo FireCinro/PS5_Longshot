@@ -505,10 +505,22 @@ bool create_device() {
     // with it saved; the replay's queue done to its last checkpoint), while frame generation off ran on it. The tester's
     // crashes stopped with RX_VK_PRESENT_QUEUE=0. #1491, another RTX 5080 on 621.24 (DLSS FG 2x saved, HDR, a lost GPU at
     // the start-up logo from nightly-458 on), looks the same and was not yet tried with =0.
+    // The Debug tab's Present queue row chooses (present_queue= in longshot_options.ini, read here at the start as
+    // robust_buffers= below: the menu's options are not loaded yet); RX_VK_PRESENT_QUEUE over it, by the switches' yes/no rule.
     uint32_t compute_family = UINT32_MAX;
     {
         bool want = false;
-        if (const char* e = getenv("RX_VK_PRESENT_QUEUE"); e && *e) want = !env_value_off(e);
+        if (const char* e = getenv("RX_VK_PRESENT_QUEUE"); e && *e) {
+            want = !env_value_off(e);
+        } else if (FILE* fl = fopen(options_path().c_str(), "r")) {   // (vk_paths.h)
+            char line[80];
+            while (fgets(line, sizeof line, fl))
+                if (!strncmp(line, "present_queue=", 14)) {
+                    want = atoi(line + 14) != 0;
+                    break;
+                }
+            fclose(fl);
+        }
         for (uint32_t i = 0; want && i < n && compute_family == UINT32_MAX; i++)
             if ((families[i].queueFlags & VK_QUEUE_COMPUTE_BIT) && !(families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT))
                 compute_family = i;
@@ -1658,7 +1670,8 @@ static void choose_present_queue() {
         return;
     }
     dev.present_queue_supported = true;
-    logf("vk: presents on a queue of their own, of compute family %u (RX_VK_PRESENT_QUEUE=0: off)", dev.present_family);
+    logf("vk: presents on a queue of their own, of compute family %u (the Debug tab's Present queue; RX_VK_PRESENT_QUEUE=0: off)",
+         dev.present_family);
 }
 
 bool open_window_surface(bool log_failure) {
