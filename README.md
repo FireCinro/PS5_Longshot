@@ -525,7 +525,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Player: Damage taken | Half, Normal, Double, Quadruple (live, while Debug tools is on; Half rounds damage up to a quarter heart; Heart protection wins) | Normal |
 | | Developer: Save my pipeline list | Saves a zip of the pipelines your play built into Downloads ([below](#send-your-pipeline-list)) | |
 | | Developer: Frame pacing | Off, On | Off; a quality preset turns it on |
-| | Developer: Threaded rendering | Auto, On, Off (after a restart). Auto is On with 12 or more processor threads for the game | Auto |
+| | Developer: Threaded rendering | Auto, On, Off (after a restart). Auto is On with 6 or more processor cores for the game, and the render thread alone with 4 or 5 | Auto |
 | | Developer: Descriptor reuse | Off, On (changes at once) | On |
 | | Developer: Sampler cache | Off, On (changes at once) | Off |
 | | Developer: Robust buffers | Auto, Off, On (after a restart) | Auto |
@@ -712,9 +712,10 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   for one run.
 - **Threaded rendering:** On draws the picture on threads of its own (a render thread and a recorder thread) while
   the game goes on to its next frame, for a higher frame rate on a processor with threads to spare; it is still being
-  tested and can show flashes. Off draws it on the game's own thread, as before. Auto chooses by the processor
-  (On with 12 or more threads for the game, Off with fewer, and Off wherever the mode is not safe). It applies after
-  a restart. `RX_VK_ASYNC` and `RX_VK_RECORDER`, when set, choose for
+  tested and can show flashes. Off draws it on the game's own thread, as before. Auto chooses by the processor's cores
+  for the game, each core counted once however many threads it runs: On with 6 or more, the render thread alone with 4
+  or 5 (where the recorder thread beside it was slower), Off with fewer, and Off wherever the mode is not safe. It
+  applies after a restart. `RX_VK_ASYNC` and `RX_VK_RECORDER`, when set, choose for
   one run.
 - **Robust buffers** (Debug tab, Developer): a read past a buffer's end is dropped instead of stopping the GPU. Auto is
   on, on every card; Off can be faster on some NVIDIA cards.

@@ -6776,12 +6776,12 @@ void fo_log(double frames) {
 
 /// (longshot) Whether this run has the render thread, from the one place async_on reads: RX_VK_ASYNC when it is set (the
 /// switch, for testing, over the menu: 0 the submitting thread, any other value the render thread), else the Insert
-/// menu's Threaded rendering as this run resolved it (vk_menu.cpp menu_threaded_rendering: On, or what Auto picks).
-/// Read once: a change of the row applies at the next start
+/// menu's Threaded rendering as this run resolved it, its render thread's half (vk_menu.cpp menu_render_thread: On, or Auto
+/// from 4 cores, in both of its tiers). Read once: a change of the row applies at the next start
 int render_thread_mode() {
     static const int mode = [] {
         const char* e = getenv("RX_VK_ASYNC");
-        return e ? atoi(e) : menu_threaded_rendering() ? 1 : 0;
+        return e ? atoi(e) : menu_render_thread() ? 1 : 0;
     }();
     return mode;
 }
@@ -6808,8 +6808,10 @@ bool async_on() {
     return on;
 }
 // (the recorder's half of the Threaded rendering row: with RX_VK_RECORDER unset, vk_recorder.h's mode_from_env asks the row
-// through this, set before anything runs; the checks that build vk_recorder.h alone leave it null, the recorder off)
-[[maybe_unused]] const bool rec_setting_hooked = (rec::g_setting_thread = menu_threaded_rendering, true);
+// through this, set before anything runs; the checks that build vk_recorder.h alone leave it null, the recorder off. The
+// recorder thread's half (menu_recorder_thread: On, or Auto from 6 cores), not the render thread's: on 4 cores Auto has the
+// render thread alone, as the recorder thread beside it was the slowest there, 18 Nov)
+[[maybe_unused]] const bool rec_setting_hooked = (rec::g_setting_thread = menu_recorder_thread, true);
 
 void readback_fell_back(int what) {
     (what == 0 ? bh_st.rb_fallback : what == 1 ? bh_st.tex_page_only : what == 2 ? bh_st.tex_exact : bh_st.rb_exact)++;
