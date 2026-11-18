@@ -4018,9 +4018,34 @@ uint64_t sparse_tl_done() {
 }
 /// Several sparse buffers' binds (memory or none) in one call, on the queue (pools_mu held, as an import's). *signaled: the
 /// value the binds' timeline reaches when they are done. Not waited for on the CPU
-bool sparse_bind_infos(std::vector<VkSparseBufferMemoryBindInfo>& infos, uint64_t* signaled = nullptr) {
+bool sparse_bind_infos(std::vector<VkSparseBufferMemoryBindInfo> infos, uint64_t* signaled = nullptr) {
     if (infos.empty()) return true;
     const auto t0 = std::chrono::steady_clock::now();
+    // The driver accepts a contiguous range in one VkDeviceMemory. Keep the original
+    // per-block lists for the caller's rollback and eventual independent unbinds.
+    size_t capacity = 0;
+    for (const auto& info : infos)
+        if (info.bindCount > 1) capacity += info.bindCount;
+    std::vector<VkSparseMemoryBind> ranges;
+    ranges.reserve(capacity);   // the pointers installed in earlier infos must stay valid
+    for (auto& info : infos) {
+        if (info.bindCount < 2) continue;
+        const size_t first = ranges.size();
+        for (uint32_t i = 0; i < info.bindCount; ++i) {
+            const auto& b = info.pBinds[i];
+            if (ranges.size() > first) {
+                auto& last = ranges.back();
+                if (last.resourceOffset + last.size == b.resourceOffset && last.memory == b.memory &&
+                    last.flags == b.flags && (!b.memory || last.memoryOffset + last.size == b.memoryOffset)) {
+                    last.size += b.size;
+                    continue;
+                }
+            }
+            ranges.push_back(b);
+        }
+        info.bindCount = (uint32_t)(ranges.size() - first);
+        info.pBinds = ranges.data() + first;
+    }
     VkResult res;
     uint64_t next = 0;
     {   // (as the sparse textures' and the dma-buf pools' binds, on the queue under its lock. The blocks bound are reached by no
@@ -4074,7 +4099,7 @@ namespace {
 bool sparse_bind(VkBuffer buffer, std::vector<VkSparseMemoryBind>& binds) {
     if (binds.empty()) return true;
     std::vector<VkSparseBufferMemoryBindInfo> infos{{buffer, (uint32_t)binds.size(), binds.data()}};
-    return sparse_bind_infos(infos);
+    return sparse_bind_infos(std::move(infos));
 }
 /// A new sparse mirror's memory, in the blocks live marks; false when VMA has none for one or the binding failed (nothing
 /// kept then: the buffer is the caller's)
@@ -5947,7 +5972,7 @@ void sparse_grow_all(const std::vector<Pool*>& pools) {
         std::vector<VkSparseBufferMemoryBindInfo> infos;
         for (Got& g : gots)
             if (!g.binds.empty()) infos.push_back({g.p->mirror, (uint32_t)g.binds.size(), g.binds.data()});
-        if (!infos.empty() && !sparse_bind_infos(infos)) {   // (none bound: their new memory back, those blocks left in guest memory)
+        if (!infos.empty() && !sparse_bind_infos(std::move(infos))) {   // (none bound: their new memory back, those blocks left in guest memory)
             for (Got& g : gots)
                 for (const VkSparseMemoryBind& bd : g.binds) {
                     const size_t i = (size_t)(bd.resourceOffset / sparse_block(*g.p));
@@ -6092,7 +6117,7 @@ void sparse_reap() {
     if (!unbind.empty()) {   // (every mirror's in one call)
         std::vector<VkSparseBufferMemoryBindInfo> infos;
         for (auto& [buf, binds] : unbind) infos.push_back({buf, (uint32_t)binds.size(), binds.data()});
-        sparse_bind_infos(infos, &unbound);
+        sparse_bind_infos(std::move(infos), &unbound);
     }
     // (the memory goes once the unbind is done on the GPU; the latest bind's value covers memory a destroyed buffer let go too)
     if (!frees.empty()) sparse_frees.push_back({unbound ? unbound : sparse_tl_value.load(std::memory_order_relaxed), std::move(frees)});
@@ -6132,7 +6157,7 @@ void sparse_reap() {
     for (DeadSparse& d : keep)
         if (!d.unbind.empty()) infos.push_back({d.buffer, (uint32_t)d.unbind.size(), d.unbind.data()});
     uint64_t after = 0;
-    if (!sparse_bind_infos(infos, &after)) {   // (still bound: nothing to keep them as)
+    if (!sparse_bind_infos(std::move(infos), &after)) {   // (still bound: nothing to keep them as)
         for (DeadSparse& d : keep) {
             destroy_sparse_buffer(d.buffer);
             st_spare_destroyed++;
