@@ -342,6 +342,9 @@ BROKEN_C = [
 WIRED = {
     # (read at each walk of the write marks; the pages found, their order and the marks cleared are the same either way)
     "HOS_COLLECT_WIDE": "host/rx_backend.c",
+    # (read at each barrier sleep and each OR's wake; the game's loop looks at its masks again after a wait or a sleep alike,
+    # and a wake skipped while off costs a waiter its 1 ms timeout at most)
+    "HOS_OOT_BARRIER_WAIT": "host/oot_barrier.c",
     # (read at each nn::os::YieldThread; nothing is kept between two yields)
     "HOS_OS_YIELD": "host/hos_thread.c",
 }
