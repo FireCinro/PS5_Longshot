@@ -4128,16 +4128,42 @@ void draw_options(ui::Ctx& c) {
         hits.add(x, 0, x + tw[i], hh, menu_hit::kTab, i);
         x += tw[i];
     }
-    {   // (which build, at the banner's left, so a report can say it without opening the log: as players see it, version_text,
-        // "Longshot v3.0.0-rc.1" or "Longshot Nightly 46 · 434712bb"; the log and the bug report keep the whole name)
-        std::string ver = std::string("Longshot ") + version_text(LONGSHOT_VERSION);
-        const float room = (c.w - total) * 0.5f - 60 * s - c.safe, px = 15 * s;
+    {   // (the banner's left: the Longshot logo and its name, a little larger than the tabs' ink; at Small and Medium smaller
+        // until it fits, at Large at its size or not at all, as the version)
+        const float room = (c.w - total) * 0.5f - 60 * s - c.safe, px = 24 * s;
+        float aspect = 1;
+        ImTextureData* logo = ui::logo(&aspect);
+        const auto width = [&](float p) {
+            return (logo ? p * 1.25f * aspect + 10 * s : 0) + ui::size_of(c.f.heading, p, "Longshot").x;
+        };
+        const float fit = ui::fit_px(px, opts.menu_size == 3 ? px : 14 * s, 0.5f * s, room, width);
+        if (fit > 0) {
+            float lx = c.safe;
+            if (logo) {
+                const float lh = fit * 1.25f;
+                c.d->AddImage(logo->GetTexRef(), ImVec2(lx, ty - lh * 0.5f), ImVec2(lx + lh * aspect, ty + lh * 0.5f));
+                lx += lh * aspect + 10 * s;
+            }
+            ui::text_mid(c, c.f.heading, fit, lx, ty, ui::kBannerInk, "Longshot");
+        }
+    }
+    {   // (which build, at the banner's right, so a report can say it without opening the log: as players see it, version_text,
+        // "v3.0.0-rc.1" or "Nightly 46 · 434712bb"; the log and the bug report keep the whole name. Under it, a development
+        // run's own name for what it tests, LONGSHOT_BUILD_NAME (mise run run-win -BuildName), when the run sets one)
+        const std::string ver = version_text(LONGSHOT_VERSION);
+        const char* named = getenv("LONGSHOT_BUILD_NAME");
+        const std::string name = named ? named : "";
+        const float room = (c.w - total) * 0.5f - 60 * s - c.safe, px = 15 * s, right = c.w - c.safe;
         const auto width = [&](float p) { return ui::size_of(c.f.body, p, ver.c_str()).x; };
         // (still too long, as a source build's "v2.0.11-821-g7b81752-dirty" since the Audio tab: at Small and Medium smaller
         // until it fits, on half-point steps, 10 points at the least; at Large, the size for a TV across the room, at its size
         // or not at all, as before)
         const float fit = ui::fit_px(px, opts.menu_size == 3 ? px : kVersionMinPt * s, 0.5f * s, room, width);
-        if (fit > 0) ui::text_mid(c, c.f.body, fit, c.safe, ty, ui::kBannerInk, ver.c_str());
+        const auto name_width = [&](float p) { return ui::size_of(c.f.body, p, name.c_str()).x; };
+        const float name_fit = name.empty() ? 0 : ui::fit_px(13 * s, opts.menu_size == 3 ? 13 * s : kVersionMinPt * s, 0.5f * s, room, name_width);
+        const float vy = name_fit > 0 ? ty - 8 * s : ty;
+        if (fit > 0) ui::text_mid_right(c, c.f.body, fit, right, vy, ui::kBannerInk, ver.c_str());
+        if (name_fit > 0) ui::text_mid_right(c, c.f.body, name_fit, right, ty + 9 * s, ui::alpha(ui::kBannerInk, 0.8f), name.c_str());
     }
     // the rows, in the column; the help beside it
     float cx0, cx1, hx0, hx1;

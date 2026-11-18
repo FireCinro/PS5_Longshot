@@ -223,6 +223,7 @@ SW(HOS_WM_CLASS, tune, string, "HOS_APP_ID", "The window's WM class / app id on 
 SW(HOS_XINPUT, attempt, bool, "XInput polled only while SDL has no controller open", "Polls XInput as well as SDL even when SDL has controllers open.")
 SW(HOS_ZERO_ALL_PAGES, kill, bool, "above 4 GB only pages not already in use are zeroed", "=1 zeroes the whole range of every page allocation, as before.")
 SW(LONGSHOT_BUILDER_HOME, player, string, "not read by the game", "The Builder's own folder; the game only refuses it from longshot_env.txt.")
+SW(LONGSHOT_BUILD_NAME, diag, string, "not set: the Insert menu shows the version alone", "A name for what a development run tests, shown under the version at the Insert menu's top right (mise run run-win -BuildName).")
 SW(LONGSHOT_DRIVER_ENV_SET, diag, string, "not set", "Set by the game itself before it restarts, naming the driver variable it took out; not for a run to set.")
 SW(LONGSHOT_NO_AV1_NOTICE, kill, bool, "the notice window is shown once (Windows, no AV1 decoder)", "No pop-up asking to install the AV1 Video Extension; the log line is still written.")
 SW(LONGSHOT_PREPARE_ONLY, player, bool, "off: a normal game run", "Marks a --prepare-shaders run: the renderer only compiles and saves shaders, skipping work a played run does.")
