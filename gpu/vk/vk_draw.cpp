@@ -988,13 +988,20 @@ bool pcache_load_off() {
         const char* e = getenv("RX_VK_PCACHE_LOAD");
         const int sw = e && *e ? (env_value_off(e) ? 0 : 1) : -1;   // (longshot_env.h: 0/off/false/no)
         const bool preparing = env_on("LONGSHOT_PREPARE_ONLY"), at_create = programs_load_at_create();
+        bool cgroup_limited = false;
 #ifdef _WIN32
         const bool linux_nvidia = false;
         const uint32_t ram_mb = 0;
 #else
         const bool linux_nvidia = dev.driver_id == VK_DRIVER_ID_NVIDIA_PROPRIETARY;   // (not NVK: Mesa's, with Mesa's cache)
         const long pages = sysconf(_SC_PHYS_PAGES), page = sysconf(_SC_PAGE_SIZE);
-        const uint32_t ram_mb = pages > 0 && page > 0 ? (uint32_t)(((uint64_t)pages * (uint64_t)page) >> 20) : 0;
+        uint64_t capacity = pages > 0 && page > 0 ? ((uint64_t)pages * (uint64_t)page) >> 20 : UINT64_MAX;
+        if (linux_nvidia && sw < 0 && !preparing && at_create) {
+            const uint64_t limit = compute_gate::cgroup_memory().limit_mb;
+            cgroup_limited = limit < capacity;
+            if (cgroup_limited) capacity = std::max<uint64_t>(1, limit);   // zero means unknown to the cache policy
+        }
+        const uint32_t ram_mb = capacity == UINT64_MAX ? 0 : (uint32_t)std::min<uint64_t>(capacity, UINT32_MAX);
 #endif
         // (NVIDIA's folder walked only where everything else says not to read the file; its size alone counts, not Mesa's)
         pcache_load::Measured cache{pcache_load::Cache::kUnknown, 0};
@@ -1010,7 +1017,7 @@ bool pcache_load_off() {
         std::string seen;   // (what was looked at: the switch, or the RAM and NVIDIA's cache where they were)
         if (sw >= 0) seen = std::string("RX_VK_PCACHE_LOAD=") + e;
         else if (choice.why == pcache_load::Why::kRam || looked)
-            seen = std::to_string(ram_mb) + " MB of RAM";
+            seen = std::to_string(ram_mb) + (cgroup_limited ? " MB cgroup memory limit" : " MB of RAM");
         if (looked) {
             seen += ", NVIDIA's own shader cache ";
             seen += cache.cache == pcache_load::Cache::kOff       ? std::string("off (__GL_SHADER_DISK_CACHE, or no folder for it)")
@@ -1401,46 +1408,6 @@ VkResult cached_graphics(const VkGraphicsPipelineCreateInfo* ci, VkPipeline* pl)
 /// an Iris Xe PC with 32 GB did not hold. On RADV with an integrated GPU too: a Radeon 760M PC with 12 GB was killed for memory
 /// while the first start made the mesh fallback's compute pipelines on every CPU (#1398). RX_VK_COMPUTE_AT_ONCE=<n>: at most
 /// n on any GPU, 0: no limit, as before
-#ifndef _WIN32
-/// (Linux) What the process's cgroup v2 limits leave, in MB: the least of memory.max less memory.current over its cgroup and
-/// those above it (a limit on a parent slice binds too); kUnknownMB with none set, or no cgroup v2 (compute_gate.h
-/// cgroup_room_mb). MemAvailable does not see them, and a cgroup's OOM killer ends the game whatever the system has
-uint64_t cgroup_available_mb() {
-    std::string path;
-    if (FILE* f = fopen("/proc/self/cgroup", "r")) {
-        char line[4096];
-        while (fgets(line, sizeof line, f))
-            if (!strncmp(line, "0::", 3)) {
-                path = line + 3;
-                while (!path.empty() && (path.back() == '\n' || path.back() == '\r')) path.pop_back();
-                break;
-            }
-        fclose(f);
-    }
-    if (path.empty() || path[0] != '/') return compute_gate::kUnknownMB;
-    uint64_t room = compute_gate::kUnknownMB;
-    for (;;) {
-        const std::string dir = "/sys/fs/cgroup" + (path == "/" ? std::string() : path);
-        char max[64] = {};
-        unsigned long long current = 0;
-        bool read = false;
-        if (FILE* f = fopen((dir + "/memory.max").c_str(), "r")) {
-            read = fgets(max, sizeof max, f) != nullptr;
-            fclose(f);
-        }
-        if (read && max[0] >= '0' && max[0] <= '9') {
-            if (FILE* f = fopen((dir + "/memory.current").c_str(), "r")) {
-                if (fscanf(f, "%llu", &current) == 1) room = std::min(room, compute_gate::cgroup_room_mb(max, current));
-                fclose(f);
-            }
-        }
-        if (path == "/") break;
-        const size_t slash = path.find_last_of('/');
-        path = slash == 0 ? "/" : path.substr(0, slash);
-    }
-    return room;
-}
-#endif
 uint64_t memory_available_mb() {
 #ifdef _WIN32
     MEMORYSTATUSEX m{};
@@ -1456,7 +1423,7 @@ uint64_t memory_available_mb() {
         if (!strcmp(key, "MemAvailable:")) kb = v, found = true;
     fclose(f);
     // (the least of the system's and the cgroup's: kUnknownMB is the largest, so either one alone stands when the other is not known)
-    return std::min(found ? (uint64_t)(kb >> 10) : compute_gate::kUnknownMB, cgroup_available_mb());
+    return std::min(found ? (uint64_t)(kb >> 10) : compute_gate::kUnknownMB, compute_gate::cgroup_memory().available_mb);
 #endif
 }
 compute_gate::Gate& compute_compiles() {

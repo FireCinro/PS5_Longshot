@@ -19,6 +19,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "compute_gate.h"   // the scoped Linux memory budget in the extracted pcache_load_off
 #ifdef _WIN32
 #define NOMINMAX   // (the extracted code calls std::max: no min/max macros from windows.h)
 #include <windows.h>
