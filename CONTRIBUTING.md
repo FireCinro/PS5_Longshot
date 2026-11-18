@@ -312,10 +312,15 @@ for scripted input, screenshots, frame dumps and profiles are in the development
   <part>` in the same commit.
 - Treat local mkw-recomp and Eglantine checkouts as read-only references.
 - New switches use `RX_` in the renderer and `HOS_` in the runtime. A change that should have one (to A/B it, to turn
-  it off, to roll it back) gets one, and it ships at its **recommended** value: on by default when that is what you
-  recommend and the measurements back it, off when it is only for testing or not yet measured enough; never off just
-  because it is new. It costs nothing while off, and it is documented beside the switches around them. The PR's
-  *Flags and settings* says its value before and after, and why.
+  it off, to roll it back) gets one, and it ships at its **recommended** value: on by default when the change is meant
+  for players, off only when the switch is for testing (a diagnostic, an experiment nobody proposes to ship); never
+  off just because it is new or not yet measured. **The pull request carries that value from its first push**, WIP or
+  not: the Test Farm, testers and your own runs test the branch as it is, so they test what would merge without setting
+  anything, and the switch is how to turn it off for an A/B or a rollback. The measurements and the run on your own PC
+  are what take it out of WIP ([Ready for review](#ready-for-review-out-of-wip)), not what turn it on; if they go
+  against it, turn the default off or drop the change before it leaves WIP, and say which. It costs nothing while
+  off, and it is documented beside the switches around them. The PR's *Flags and settings* says its value before and
+  after, and why.
 - The GPU replay rules in [design notes, section 4](docs/design.md#4-the-lessons-from-mkw-as-rules-here) are not
   suggestions: nothing the replay reads may come from live guest memory, waits are honoured per queue, and texture and
   sampler registrations stay in submission order.

@@ -209,8 +209,10 @@ included, has every player translate every program again at their next start, so
 elsewhere. The build reads its own from the
 environment. The README has the ones players are asked to try (`RX_VK_ASTC_RGBA8`, `RX_VK_LOW_SPEC`,
 `RX_VK_MOVIE_UPSCALE`, `RX_VK_SKIP_CODE`, `HOS_OOT_CHEATS`). A change that should be possible to A/B, turn off or roll
-back gets a switch, and the switch ships at its recommended value: on by default when that is the recommendation and it
-was measured, off when it is only for testing; never off just because it is new ([CONTRIBUTING.md](../CONTRIBUTING.md#code-and-data-conventions)).
+back gets a switch, and the switch ships at its recommended value: on by default when the change is meant for players,
+off only when it is for testing; never off just because it is new or not yet measured. The branch has that value from its
+first push, WIP or not, so every run tests what would merge; the measurements decide when it leaves WIP, not when it
+turns on ([CONTRIBUTING.md](../CONTRIBUTING.md#code-and-data-conventions)).
 A pull request that adds or changes one lists it in its description's *Flags and settings* (its value before and after,
 and the recommendation) and documents it here. There are several hundred more, most of them one-off
 experiments: `grep -rnE '(getenv|env_on)\("' host gpu/vk` lists them, and the comment where each is read says what it
