@@ -569,7 +569,8 @@ def check_source():
         ("vk_texture.cpp", "void texture_frame(uint64_t completed)",
          ("if (dev.policy.set(Sw::staging_keep)) return dev.policy.staging_keep;",
           "return policy_rule::staging_keep(vram_usage(&used, &allowed) ? allowed : 0);",
-          "policy_rule::squeeze_damped(allowed) ? (over / 4) : over;",
+          # (of what is left of the excess once the pools gave theirs back: the budget's arbiter, account_ask)
+          "policy_rule::squeeze_damped(allowed) ? (left / 4) : left;",
           "texture_rule::integrated_bytes(a, device_vram_bytes(), astc_on_cpu())",
           "own = policy_rule::integrated_texture_budget(driver_budget, system_ram, astc_on_cpu());")),
         ("vk_replay.cpp", "bool batch_on() {", ("const bool v = dev.policy.batch_submits;",)),

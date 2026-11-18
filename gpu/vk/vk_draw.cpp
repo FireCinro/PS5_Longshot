@@ -4431,6 +4431,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
                 if (b && d.is_written) {
                     const auto t1 = slow_desc_timing() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
                     const uint64_t guest = host->gpu_guest(base);
+                    memory_check_writer(1, p.key);   // (RX_VK_MEM_CHECK: a storage buffer this program writes)
                     if (guest) { ParLock lk; memory_stamp_gpu(guest, n); }
                     if (slow_desc_timing()) slow_descriptor(t1, "stamp", base, n);
                 }

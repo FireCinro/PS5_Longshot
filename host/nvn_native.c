@@ -963,7 +963,12 @@ static void texels(Ctx *c, int write, int strided) {
     HT_ZONE_TEXTF(tz, "%s", write ? "write" : "read");
 #endif
     if (write) rx_nvn_write_texels(t, level, layer0, r, data, row, img), watch_texels_source(t, data, img);
-    else rx_nvn_read_texels(t, level, layer0, r, data, row, img);
+    else {
+        /* (the texels land in a buffer of the game's choosing, which may be memory the GPU reads later, a pool it
+           uploads from: marked written after the copy, as any host write of guest memory the renderer may hold) */
+        rx_nvn_read_texels(t, level, layer0, r, data, row, img);
+        if (data) HOS_WRITTEN(data, (size_t)extent);
+    }
 }
 NV(nvnTextureReadTexels) { texels(c, 0, 0); }
 NV(nvnTextureReadTexelsStrided) { texels(c, 0, 1); }

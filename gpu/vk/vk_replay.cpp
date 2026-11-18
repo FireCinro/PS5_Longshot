@@ -1263,7 +1263,8 @@ bool ub_try_gap(size_t first, size_t lim, uint64_t addr, uint64_t n) {
 // it is kept while that gap covers it and its page is unstamped)
 struct UbWord {
     uint64_t addr = 0, rec = 0;
-    uint32_t page = 0, v = 0;
+    uint64_t page = 0;   // (its page's generation when noted: memory_page_stamp)
+    uint32_t v = 0;
     bool on = false;
 };
 thread_local UbWord ub_words[128];
@@ -1354,7 +1355,7 @@ bool ub_read(uint64_t addr, void* dst, uint64_t n) {
             return true;
         }
     }
-    const uint32_t page = n == 4 ? memory_page_stamp(addr) : 0;
+    const uint64_t page = n == 4 ? memory_page_stamp(addr) : 0;
     if (!memory_read_as_submitted(addr, dst, n)) return false;
     // (most words are not inside an inline update: the scan that finds that is kept for the gap, and the next words
     // in the gap do not walk the list. A word kept from that gap is the capture's own bytes)
@@ -2659,6 +2660,7 @@ void submit_memory_work(uint64_t value) {
     memory_take_capture(value, completed());
     const auto m2 = std::chrono::steady_clock::now();
     memory_collect_written();
+    memory_check_submit(value);   // (RX_VK_MEM_CHECK: nothing unless it is set)
     const auto m3 = std::chrono::steady_clock::now();
     memsync_part_ns[1] += std::chrono::duration_cast<std::chrono::nanoseconds>(m2 - m1).count();
     memsync_part_ns[2] += std::chrono::duration_cast<std::chrono::nanoseconds>(m3 - m2).count();
@@ -6471,6 +6473,7 @@ struct Job {
     bool has_crop = false;
     nvn_prog prog;
     std::chrono::steady_clock::time_point queued;
+    uint64_t cap_seq = 0;       // (RX_VK_MEM_CHECK: the number of the capture made with it, for its take to match; 0: none)
 };
 std::mutex q_mu;
 std::condition_variable q_cv, q_space, q_idle;
@@ -6922,7 +6925,10 @@ void replay_thread_main() {
         else if (j.kind == JOB_REGISTER_TEXTURE || j.kind == JOB_REGISTER_SAMPLER) fa_window.regs++;
         else if (j.kind == JOB_TEXTURE_RELEASED || j.kind == JOB_PROGRAM_RELEASED) fa_window.releases++;
         switch (j.kind) {
-        case JOB_SUBMIT: submit_job(j.handles, j.value, j.queue); break;
+        case JOB_SUBMIT:
+            memory_check_expect_capture(j.cap_seq);   // (RX_VK_MEM_CHECK: its take is of the capture its submit made)
+            submit_job(j.handles, j.value, j.queue);
+            break;
         case JOB_PRESENT:   // (the frame's work whole before it is shown)
             if (present_held) held_present_run(true);   // (two presents ahead: the one before it first)
             if (cpu_wait_unmet()) {
@@ -6970,6 +6976,7 @@ void replay_thread_main() {
                 HT_SCOPE("signal job: capture");
 #endif
                 std::lock_guard lk(replay_mu);
+                memory_check_expect_capture(j.cap_seq);   // (RX_VK_MEM_CHECK)
                 memory_take_capture(j.queue, completed());
                 st_resume_captures++;
             }
@@ -7155,6 +7162,7 @@ void submit_q(const uint64_t* handles, int n, uint64_t queue) {
         // counted into the other set, and the foliage, grass, characters and particles of that frame were never drawn.
         // With it the syncs take the submits' captures, as the console's GPU sees its memory.
         memory_capture_submit();
+        memory_check_expect_capture(memory_check_capture_seq());   // (RX_VK_MEM_CHECK: taken below, on this thread)
         // (RX_VK_SUBMIT_DELAY_US=<us> (a test): a console's GPU starts later than this replay does. Does what a submission reads
         // arrive just after it, from the game's other threads?)
         static const int delay_us = getenv("RX_VK_SUBMIT_DELAY_US") ? atoi(getenv("RX_VK_SUBMIT_DELAY_US")) : 0;
@@ -7183,6 +7191,7 @@ void submit_q(const uint64_t* handles, int n, uint64_t queue) {
     memory_capture_submit();   // (the pages as they are now, on the game's thread: vk_memory.cpp)
     bh_note_waits(handles, n);
     Job j{JOB_SUBMIT};
+    j.cap_seq = memory_check_capture_seq();   // (RX_VK_MEM_CHECK: 0 unless it is set)
     j.handles.assign(handles, handles + std::max(n, 0));
     j.queue = queue;
     enqueue(std::move(j));
@@ -7316,6 +7325,7 @@ void event_signal_queued(uint64_t gpu, uint32_t value) {
     std::lock_guard lk(submit_order_mu);
     if (bh_signal_meets(gpu, value)) {
         memory_capture_submit();
+        j.cap_seq = memory_check_capture_seq();   // (RX_VK_MEM_CHECK)
         j.id = 1, j.queue = q_values.load();   // (its capture, and the newest value handed out: the take's)
         bh_st.sig_caps++;
     }

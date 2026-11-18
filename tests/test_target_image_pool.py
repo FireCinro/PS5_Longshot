@@ -90,7 +90,10 @@ class TargetImagePoolTests(unittest.TestCase):
         self.assertIn("pool_put(*it);", loop[:loop.index("destroy_image(")])
         trim = frame.index("pool_trim();")
         self.assertLess(trim, frame.index("if (!dead_targets::pass_due(frame_no)) {"))   # (every present, not every tenth)
-        self.assertIn("pool_pressure = !known ? 0 : (used > allowed / 100 * 97) ? 2 : (pressure > allowed / 10 * 9) ? 1 : 0;", frame)
+        # (the pool's pressure is the arbiter's level, from the lines this read before: pressure past 90% of the allowance, 1,
+        # and the count past 97% of it, 2 (mem_account.h, tests/test_mem_account.py). #637 made the one "pressed" these two)
+        self.assertIn("const mem_account::Ask asked = arbiter.look(pressure, used, known ? allowed : 0);", frame)
+        self.assertIn("pool_pressure = (uint8_t)asked.level;", frame)
 
     def test_the_trim_is_bounded_a_present_and_gives_back_idle_and_excess_images(self):
         trim = block(self.tex, "size_t pool_trim()")
