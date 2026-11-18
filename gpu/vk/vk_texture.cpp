@@ -626,8 +626,9 @@ VkPipeline astc_pipe = VK_NULL_HANDLE;
 /// re-encoded as BC3 in one upload submission (some 2000 dispatches), held it for 4-6 s before Windows reset it.
 /// Decoded on the CPU, about 6 s an array on the replay thread (a pause as the area loads), it loaded Kokiri Forest
 /// 4 times of 4. The 860M hits the same device loss on those arrays (#1040); RX_VK_ASTC_CPU=1 avoids it. The textures
-/// are then RGBA8 (no BC3), in the system memory an integrated GPU draws from anyway. The 4,096 MB iGPU texture cap
-/// is unchanged: on a 32 GB PC the RGBA8 arrays can thrash it until RX_VK_VRAM_MB is raised. Ryzen 9000's was not tried
+/// are then RGBA8 (no BC3), in the system memory an integrated GPU draws from anyway; with ASTC decoded on the CPU,
+/// texture_frame raises the iGPU texture cap above 16 GB RAM (6 GB at 24 GB, 8 GB above 24 GB) so the RGBA8 arrays do
+/// not thrash the 4,096 MB cap. Ryzen 9000's was not tried
 bool astc_on_cpu() {
     static const bool on = [] {
         const bool v = dev.policy.astc_on_cpu;   // (device_policy.h: the rule above by this PC, then the switch)
@@ -4973,7 +4974,7 @@ void texture_frame(uint64_t completed) {
         const bool igpu = dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
         const uint64_t a = known ? allowed : 0;
         own = getenv("RX_VK_VRAM_MB") ? (uint64_t)atoi(getenv("RX_VK_VRAM_MB")) << 20
-              : igpu                 ? texture_rule::integrated_bytes(a, device_vram_bytes())
+              : igpu                 ? texture_rule::integrated_bytes(a, device_vram_bytes(), astc_on_cpu())
                                      : texture_rule::dedicated_bytes(a, device_vram_bytes(), system_ram_bytes());
         if (!igpu)   // (the integrated GPUs' own line follows, with their caps by the system's RAM)
             logf("vk: texture budget: %llu MB (driver allows %llu MB, the card has %llu MB, RAM %llu MB%s)",
@@ -5008,10 +5009,11 @@ void texture_frame(uint64_t completed) {
 
             // (the rule is device_policy.h's integrated_texture_budget, written once: a third of the RAM left to the game's own
             // allocations (~10 GB), the targets, buffers and pipelines (~3-4 GB), the system and the driver, 8 GB at least
-            // and 16 at most; a cap by the RAM, 1.5 GB at 8 to 6 GB past 32; 1 GB at least; never more than the share)
+            // and 16 at most; a cap by the RAM, 1.5 GB at 8 to 6 GB past 32, or 6/8 GB past 16 GB when ASTC is decoded on the
+            // CPU; 1 GB at least; never more than the share)
             const uint64_t reserved = policy_rule::integrated_reserved(system_ram);   // (for the line below)
             const uint64_t driver_budget = own;  // (its share of the allowance: texture_budget.h integrated_bytes)
-            own = policy_rule::integrated_texture_budget(driver_budget, system_ram);
+            own = policy_rule::integrated_texture_budget(driver_budget, system_ram, astc_on_cpu());
 
             if (!told) {
                 told = true;
