@@ -8248,6 +8248,9 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     PROF_HOT(PROF_CMDS);
     texture_watch_prog(p.key);
     if (!same_desc) gfx_sampled() = draw_sampled();
+    // (longshot) NVIDIA DLAA before the game's bloom and tone map: the frame's draws into the scene and those that read it, and
+    // at the bloom's first draw DLAA on the scene, before this draw reads it (vk_temporal.cpp, pre_bloom.h)
+    temporal_pre_bloom(cmd, p.key, gfx_sampled(), at.color, at.n);
     static const bool barrier_every = env_on("RX_VK_BARRIER_EVERY_DRAW");   // (an experiment: a pass each)
     if (barrier_every) end_pass(cmd);
     reactive_scene_draw(cmd, p, s, at);
