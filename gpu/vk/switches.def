@@ -603,7 +603,7 @@ SW(RX_VK_SHOT_FROM, diag, int, "-1: no range", "First present of a range in whic
 SW(RX_VK_SHOT_FX, diag, bool, "off", "=1 takes shots through the window's scale pass too, so they show what the window shows.")
 SW(RX_VK_SHOT_GO, diag, string, "unset", "<file>: every present is shot while that file exists, for a test's run of frames.")
 SW(RX_VK_SHOT_H, diag, int, "720", "Height of the RX_VK_SHOTS screenshots.")
-SW(RX_VK_SHOT_MADE, diag, bool, "off", "=1 also writes the interpolated frame before each shot as vk_N_made.png.")
+SW(RX_VK_SHOT_MADE, diag, bool, "off", "=1 also writes the interpolated frame before each shot as vk_N_made.png; =all each shot the set's next made frame in turn, as vk_N_madeK.png (K its place in the set).")
 SW(RX_VK_SHOT_MENU, diag, bool, "off", "=1 ticks the Insert menu each present in a headless run and draws it into the shots.")
 SW(RX_VK_SHOT_TO, diag, int, "-1: no range", "Last present of the range in which every present is shot (with RX_VK_SHOT_FROM).")
 SW(RX_VK_SHOT_W, diag, int, "1280", "Width of the RX_VK_SHOTS screenshots.")
