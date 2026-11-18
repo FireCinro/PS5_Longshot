@@ -608,6 +608,42 @@ then measure the change without it ([measure skill](../.claude/skills/measure/SK
 `HOS_PROFILE=<seconds>` (the busiest threads' log alone, before the mode) turns the whole mode on now, with its seconds
 for the log's lines.
 
+#### An A/B within one run
+
+Two runs of the same build can differ by a few fps (on a 4-core PC, +-3 fps), more than the 2-5 % a change is often worth.
+`HOS_AB=<switch>=<value>[,<seconds>[,<warm-up seconds>]]` measures both sides in one run instead (`host/hos_ab.c`): after
+the warm-up (20 s by default, counted from the start of the process: make it cover the boot, the save's load and whatever
+the scene needs to settle), the switch alternates every period (3 s by default) between its normal value (side 0, first)
+and `<value>` (side 1, a whole number), and each frame is counted for the side it ran on. What drifts slower than a period
+(the PC's other work, its clocks, the scene) falls on both sides alike.
+
+```sh
+# (in the environment or longshot_env.txt) the write marks' old 32-mark walk against the 256-mark one, 3 s each after 60 s
+HOS_AB=HOS_COLLECT_WIDE=0,3,60
+RX_VK_FRAME_TRACE=1
+```
+
+```sh
+python -I scripts/ab_summary.py <game folder>/logs/longshot_frames.csv [more runs' traces]
+```
+
+The frame trace's last column, `ab_side`, is each frame's side: -1 outside the A/B, 0 or 1, and 2 or 3 for that side's
+frames in a transition (a flip inside the frame, or less than 0.3 s before its end), which the summary leaves out. It
+prints, for each side, the frames, the mean, median and 99th percentile frame time, the share of frames of 16.7 ms or more
+and the fps; then side 1 less side 0 with a 95 % interval for the mean's difference (a bootstrap that resamples whole
+periods, since a period's frames are alike) and whether the interval holds 0. It leaves out a last period the run's end cut
+short, and one more when needed so that the periods kept start and end on side 0: a frame time that drifts steadily over
+the run then moves both sides' means alike. Several traces give each, then all together. The host's own sums of the
+presents by side end the log (`ab: <switch>=<value> against its normal value, ...`, at the game's close); that line also
+says when no switch of that name was read during the A/B (both sides then ran the same).
+
+A switch takes part only where its reader asks `hos_ab_value` (`host/hos.h`) at each use rather than once: today
+`HOS_COLLECT_WIDE` (0/1: the pages a walk finds are the same either way); `tests/test_hos_ab.py` lists every wired switch.
+Wiring another means checking that it can change between two calls without breaking what the other value built (a cache
+whose every hit is checked, state that either way makes and both ways take); a switch whose value sets something up once,
+at the start or at the lift, can't. With no `HOS_AB` (or a value it refuses, which the log says), a reader's cost is one
+load.
+
 #### The switches
 
 | Switch | What it does |
@@ -630,7 +666,7 @@ for the log's lines.
 | `HOS_MOVIE_PACE=0` | Leave the pacing at the Game frame rate cap row while a movie plays, instead of raising a 60 FPS cap to 240 for the movie's pictures (issue #73); an explicit 30 FPS cap remains 30 |
 | `RX_VK_PERF_INTERVAL=<60-840>` | Seconds of play between two performance summaries, with Send performance statistics on (default 300; at most 840, a minute under the relay's 900 s a summary): [performance statistics](performance-statistics.md#switches) |
 | `RX_VK_FRAME_LOG=<csv>` | A CSV line per present: frame, seconds, frame time in ms. Also works with `HOS_HEADLESS`: CPU intervals after submitting the offscreen copy, without swapchain/display waits. Not `RX_VK_FRAMELOG` (no underscore: pictures, above) |
-| `RX_VK_FRAME_TRACE=1` | `logs/longshot_frames.csv` (with `HOS_PROFILE=1`, `frames.csv` in the profile folder): a line a present with what the frame did (waits for pipelines, translation, uploads, the memory sync, the GPU behind, the read-backs' and the capture's waits), then the frame as the FPS counter's Breakdown splits it (`game_ms`, `render_ms`, `gpu_wait_ms`, `pace_ms`, `wait_render_ms`, `wait_gpu_ms`, `wait_main_ms`; measured whatever the counter shows) and the game's main thread's own time in the frame: on the CPU (`main_cpu_ms`), blocked in waits and sleeps (`main_blocked_ms`) and waiting for a virtual core (`main_vcore_ms`); the frame less those three is its time running but off the CPU; then `at_ns`, the present on the host's clock |
+| `RX_VK_FRAME_TRACE=1` | `logs/longshot_frames.csv` (with `HOS_PROFILE=1`, `frames.csv` in the profile folder): a line a present with what the frame did (waits for pipelines, translation, uploads, the memory sync, the GPU behind, the read-backs' and the capture's waits), then the frame as the FPS counter's Breakdown splits it (`game_ms`, `render_ms`, `gpu_wait_ms`, `pace_ms`, `wait_render_ms`, `wait_gpu_ms`, `wait_main_ms`; measured whatever the counter shows) and the game's main thread's own time in the frame: on the CPU (`main_cpu_ms`), blocked in waits and sleeps (`main_blocked_ms`) and waiting for a virtual core (`main_vcore_ms`); the frame less those three is its time running but off the CPU; then `at_ns`, the present on the host's clock, and `ab_side`, the frame's side in [an A/B within one run](#an-ab-within-one-run) (-1 without `HOS_AB`) |
 | `RX_VK_PRESENTS_AHEAD=<1-8>` | How many presents the game may hand over ahead of the render thread (`RX_VK_ASYNC=1`; 1 by default) |
 | `RX_VK_FG_FIFO_CAP=1` | For a G-SYNC or FreeSync display: under FIFO (V-Sync On; Auto with DLSS Frame Gen) with a fixed frame generation multiplier, frames made and NVIDIA Reflex on, the game held to the multiplier's share of refresh - refresh²/3600 frames a second (52.5 at 3x and 165 Hz), so the made frames stay under the refresh (docs/design.md section 13, rule 6: 3x on 165 Hz with a 60 cap, 29 ms on screen against 45 to 51; uncapped, about main's). Off by default: on a display of a fixed refresh it leaves a refresh without a new frame several times a second, and the game cannot tell the two. Without it FIFO's catch-up keeps the sets from queuing (the made frames the refresh has no room for left out) |
 | `RX_VK_FG_LATENCY_LOG=<csv>` | A CSV line per present of frame generation's display thread: whether it shows the game's frame (1) or a made one (0), the game frame's hand-over (`framegen_record`), the present's call and its return, as QueryPerformanceCounter ticks. PresentMon with `--qpc_time` starts each present between that call and return, so its row gives each game frame's time from the hand-over to the screen, which PresentMon's own latency (from the display thread's present before) does not include. Under FIFO NVIDIA's driver starts each present up to 100 ms after the call, so that join cannot tell the presents apart: with NVIDIA Reflex on, `<csv>.shown.csv` has each game frame's (of a set presented ahead: not 7x and 8x under FIFO on an NVIDIA surface by the renderer's own or FSR 3.1, shown as they come) present id, hand-over, call and time on screen as the driver's present wait (`VK_KHR_present_wait`) tells it. For latency A/B runs of frame generation's pacing |
@@ -771,6 +807,7 @@ The renderer's memory, every 600 presents in the log (`vk: budget:`, what each p
 | `HOS_VCORES=0`, `HOS_CORES=<1..8>`, `HOS_RESERVE_CORE=0` | No virtual cores; the cores the game sees (6); no core kept for the replay (one is, with 8 or more logical processors) |
 | `HOS_VCORE_STARVE_US=<microseconds>` | A game thread that has waited this long for a virtual core (default 1000000, 1 s; 0: never) goes before every other waiter at the next release of a core it may use, and asks the holder to give the core up at its next checkpoint whatever the holder's priority, so a wait that better threads keep winning ends in a grant, not in the escape after 2 s (`HOS_VCORE_ESCAPE_US`, `HOS_VCORE_ESCAPE_EQ_US`). The `vcores:` line every 5 s counts these grants (`starved grants`) |
 | `HOS_VCORE_LOG_MS=<ms>` | A game thread's wait for a virtual core this long (default 50; 0: none) is logged with its cause: the thread whose release ended it (its priority, how long it had held the core, how long after it was asked to give it up it did), or how it ended otherwise, and the holders of the cores it may use as it ends. The first 200 a run; the 5 s `vcores:` line counts them all |
+| `HOS_OS_YIELD=1` | The game's `nn::os::YieldThread` (after every job and actor callback) gives up its virtual core only, by default; `1` gives up the processor too (`SwitchToThread`), as before (`host/hos_thread.c`; `HOS_AB` may flip it). On 4 cores the job threads spent about 0.75 of the four processors in kernel time handing the processor over and back; without it, frame time -2.1 % and -1.7 % (in-run A/Bs standing in Castle Town's market), no difference on 16 cores |
 | `HOS_NATIVE_ZSTD=0/1/2`, `HOS_NATIVE_ZSTD_FRAMES=0` | The game's zstd decodes on the host's libzstd 1.5.7 (`host/hos_zstd.c`), both on by default: `HOS_NATIVE_ZSTD` the stream decode (ParallelDecompThread; unset or 2 keeps the virtual core while it decodes, 1 gives it up, 0 runs the game's own decoder as lifted code), `HOS_NATIVE_ZSTD_FRAMES` the resource loaders' whole-buffer decode (the ARes_Loading threads; 0: lifted). The log names each decode that runs on the host, and each kind that still runs lifted, once |
 | `HOS_TEX_COMPACT_MS=<ms>` | The game's own compaction of its texture data heap (`host/oot_tex_compact.h`, `nx2/oot_patches.py`): its texture manager asks for a round at every frame none runs, and every texture a round moved is finalized and made again, which the renderer meets as a batch of new textures (about 23, 10 MB, every 9 frames standing in Castle Town's market). At least that many milliseconds pass from one round's start to the next: `1000` by default, `0` is the game's own (every frame), `off` never asks. The round itself is the game's, untouched. The log says what was chosen and, every 3,600 asks, how many rounds were let through |
 | `HOS_SHADOW_BUCKET=<step>` | The storage a character's shadow map reserves (`host/shadow_slot.h`). OoT sizes each near character's square depth map anew every frame (384 from far, up to 1920 near) and makes a frame's render targets one after another in a first-fit heap, so a map a few pixels larger moved every target after it to a new address: 15-16 textures made a frame in Castle Town's market with the camera turning. Such a map is answered the storage size and alignment of the next multiple of the step up (384 by default: 768, 1152, 1536, 1920), so the targets after it stay where they are until it crosses a step; the texture keeps its own size. `0`: every texture its own storage, as before |

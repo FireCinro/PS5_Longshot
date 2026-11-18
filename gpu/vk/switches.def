@@ -5,6 +5,7 @@
 // The kinds and the rules are in switches.h; tests/test_switch_table.py holds the table and the source to each other.
 // The rows were first written on 2026-11-16 from a reading of each switch's code: where a row and the code disagree, the
 // code is right and the row wants correcting.
+SW(HOS_AB, diag, string, "off: no A/B", "<switch>=<value>[,<seconds>[,<warm-up s>]]: after the warm-up (20 s) the switch alternates every period (3 s) between its normal value and <value>, an A/B within one run; the frame trace gets ab_side (scripts/ab_summary.py).")
 SW(HOS_ASPECT, player, float, "the menu's Aspect ratio row (ultrawide=)", "Sets the picture's aspect ratio (e.g. 2.3889) over the options file's Aspect ratio.")
 SW(HOS_AUDIO, kill, bool, "sound device opened", "=0 opens no sound device; the mixer still runs.")
 SW(HOS_AUDIO_CHANNELS, player, int, "the menu's Audio output row, else the default device's layout", "Forces the layout the game mixes for: 6 or more is 5.1, anything else stereo.")
@@ -20,7 +21,7 @@ SW(HOS_AV1_ASYNC, attempt, bool, "off: the synchronous (software) AV1 decoder is
 SW(HOS_AV1_MISSING, diag, bool, "off", "=1 behaves as if the Media Foundation AV1 decoder were missing, to see the message a player gets.")
 SW(HOS_CACHE_CORES, hw, bool, "Windows: on CPUs whose L3 caches differ in size, the game is kept to the largest L3's cores", "=0 lets the game's threads run on every core.")
 SW(HOS_CHAIN, diag, string, "off: one load and a branch per wait and signal", "Writes the guest threads' blocks and wake-ups to the given path, for the frame's critical path (scripts/chain.py).")
-SW(HOS_COLLECT_WIDE, kill, bool, "on: the written-page walk tests 256 marks at once", "=0: the walk steps over at most 32 clear write marks at a time, as before.")
+SW(HOS_COLLECT_WIDE, kill, bool, "on: the written-page walk tests 256 marks at once", "=0: the walk steps over at most 32 clear write marks at a time, as before; HOS_AB may flip it.")
 SW(HOS_COND_RECORD, attempt, enum, "0: conditional-render conditions read at replay", "1-4: conditions (and for 3, 4 the reports) are read at record time instead of at replay.")
 SW(HOS_CONTROL, diag, string, "off: no control bridge", "Starts the control bridge on the given socket path, so a local tool or test can drive the game.")
 SW(HOS_CONTROL_MEM, diag, enum, "off: the control bridge cannot read or write guest memory", "ro or rw lets control bridge clients read (or read and write) the game's memory.")
@@ -133,6 +134,7 @@ SW(HOS_OOT_TELEPORT_EVENT, diag, string, "Dm_SY_BancChangeGo", "Names the game e
 SW(HOS_OOT_TELEPORT_STARTER, kill, bool, "the teleport's event is run with its starter", "=0 runs the Debug tab's teleport event without the starter.")
 SW(HOS_OOT_TRACE_SAVES, diag, bool, "off", "Logs each save request (reason, mode, caller) and each suppressed transition autosave.")
 SW(HOS_OPTIONS_FILE, diag, string, "--user's folder, the launcher's folder, else beside the game", "Names the settings file (longshot_options.ini) to use, so a scripted run leaves the player's alone.")
+SW(HOS_OS_YIELD, kill, bool, "off: nn::os::YieldThread gives up the virtual core only (no SwitchToThread)", "=1: the game's yields give up the processor too, as before; HOS_AB may flip it.")
 SW(HOS_OUTPUT_RES, player, string, "the options file's output_res, else 2560x1440 or the screen's size", "Sets the output resolution (WxH) for a run, over the menu's Output resolution row.")
 SW(HOS_PAGES_LIMIT, attempt, bool, "off: mapped pages are only counted and logged", "=1 makes AllocateMemoryPages fail past the console's total memory, as on the console.")
 SW(HOS_PGO, diag, string, "unset: no counter dumps", "In an RX_PGO=gen build, <file>.reset clears and <file>.dump writes the profile counters; also turns the crash window off.")

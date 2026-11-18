@@ -2250,6 +2250,7 @@ static int game_main(int argc, char **argv) {
     hos_prof_start();   /* HOS_PROFILE_EVERY=<seconds>, the samplers, HOS_PROFILE=1 */
     void hos_chain_start(void);
     hos_chain_start();  /* HOS_CHAIN=<path> */
+    hos_ab_start();     /* (longshot) HOS_AB=<switch>=<value>: an A/B within the run (host/hos_ab.c), before the game's threads */
 #ifdef _WIN32
     timeBeginPeriod(1);   /* 1 ms timer resolution: the 60 Hz vsync and the game's frame pacing sleep in short steps */
     no_power_throttling();
