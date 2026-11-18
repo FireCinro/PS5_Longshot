@@ -1123,7 +1123,7 @@ The rules worth knowing (the script's notes have all of them):
   stores are `dev_packs.py`'s (`%LOCALAPPDATA%\Longshot\objects` and `lifts`), the settings file is
   `%APPDATA%\Longshot\dev_build.json` (beside `job_queue.json`) and a checkout's own files go in its `build-windows\`. The
   build tools are tools.lock's `windows-x64` lines, installed by `scripts/tools.py install` and set as the Windows builder
-  has them (its `llvm-mingw` as `LONGSHOT_MINGW`, `EMSDK`, `RX_CPM`); its Python, which has the build's packages, runs the
+  has them (its `llvm-mingw` as `LONGSHOT_MINGW`, and `RX_CPM`); its Python, which has the build's packages, runs the
   build, and the tree a build reads gets the builder's prebuilt `SDL2.dll` and `SDL3.dll` in `third_party\sdl2` (git
   ignores them). `env` prints PowerShell's `$env:` lines; `vk` builds `longshot_vk.dll` and checks it exports `mkwvk_init`
   (an undefined symbol already fails the link there). The game's files are found in `~\Games` and `~\Games\Longshot` (the
