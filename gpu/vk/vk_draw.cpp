@@ -38,6 +38,7 @@
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
 
 #include "vk_paths.h"
+#include "vk_progress.h"   // (PrepareWork: prepare_run's count of the programs, each at its cost)
 #include "pipeline_cache_file.h"
 #include "vk_draw.h"
 #ifdef TRACY_ENABLE
@@ -9531,7 +9532,7 @@ bool warm_libraries(void (*progress)(size_t done, size_t total)) {
 /// and every thread takes queued variants before it takes another program, so a program's variants are compiled side by side
 /// and only a few programs are read in at once. The gate (compute_gate.h) decides how many compiles run. progress: in programs.
 /// only: the programs to warm, the precompile's plan (computes_plan), null for every kept one. The programs done
-size_t warm_computes_apart(void (*progress)(size_t done, size_t total), const std::function<void(Program&)>& warm,
+size_t warm_computes_apart(const std::function<void(size_t done, size_t total)>& progress, const std::function<void(Program&)>& warm,
                            const std::unordered_set<uint64_t>* only) {
     std::vector<uint64_t> keys = program_cache_compute_keys();
     if (only) keys.erase(std::remove_if(keys.begin(), keys.end(), [&](uint64_t k) { return !only->count(k); }), keys.end());
@@ -9681,10 +9682,12 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
     // (~20 s of a ~165 s prepare with fewer and fewer CPUs busy, 12 workers on a 24-thread PC). Taken first, the graphics programs
     // fill in behind them
     std::vector<uint32_t> order(programs);
+    size_t computes = 0;
     {
         size_t at = 0;
         for (size_t k = 0; k < programs; k++)
             if (seed_is_compute(k)) order[at++] = (uint32_t)k;
+        computes = at;
         for (size_t k = 0; k < programs; k++)
             if (!seed_is_compute(k)) order[at++] = (uint32_t)k;
     }
@@ -9702,6 +9705,15 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
     const std::unordered_set<uint64_t> none;
     const ComputePlan* plan = warm_cs ? &compute_warm_plan() : nullptr;
     const auto* only = !plan || plan->all ? nullptr : plan->none ? &none : &plan->keys;
+    // (longshot) The bar's count, in programs, each at its cost (PrepareWork, vk_progress.h): the compute programs first, with their
+    // driver compiles, held it near 0% for as long as they took (#1522). Those the plan compiles count at that cost, as many as it
+    // names (the seed's own keys are the translator's, not read here); the rest are translated alone. work: in thirds of a graphics
+    // program; warm_credited: what this thread's compute program has counted of its compiles so far, warm_seen: whether it compiled
+    const size_t warmed_computes = only ? std::min(only->size(), computes) : computes;
+    const PrepareWork work_of(programs, warmed_computes, warm_cs);
+    std::atomic<uint64_t> work{0};
+    static thread_local uint64_t warm_credited = 0;
+    static thread_local bool warm_seen = false;
     bool warming_apart = false;   // (the pass after the translation runs: warm_compute compiles)
     const auto warm_compute = [&](Program& p) {
         if (!warm_cs || taau_key(p.key) || (apart && !warming_apart)) return;
@@ -9723,6 +9735,13 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
         }
         if (p.layout) vkDestroyPipelineLayout(dev.device, p.layout, nullptr), p.layout = VK_NULL_HANDLE;
         if (p.set_layout) vkDestroyDescriptorSetLayout(dev.device, p.set_layout, nullptr), p.set_layout = VK_NULL_HANDLE;
+        // (compiled on the worker that translated it: each variant moves the bar, its program's share at most. The pass apart
+        // counts its own, below)
+        warm_seen = true;
+        if (!warming_apart && warm_credited < work_of.warm_each) {
+            const uint64_t step = std::min<uint64_t>(PrepareWork::kGraphics, work_of.warm_each - warm_credited);
+            warm_credited += step, work += step;
+        }
     };
     const auto worker = [&] {
         ub_thread_off();   // (a background thread: see ub_thread_off)
@@ -9735,10 +9754,13 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
             const size_t k = order[i / 3];
             if (seed_is_compute(k)) {   // (longshot) a compute program with each of its texture variants, each warmed
                 if (i % 3 == 0) {
+                    warm_credited = 0, warm_seen = false;
                     const SeedVariants v = seed_compute(k, 64, warm_compute);
                     made += v.variants != 0, variants += v.variants, asking += v.variants > 1, capped += v.capped && v.variants;
+                    if (!apart && warm_seen)   // (its compiles, all counted)
+                        work += work_of.warm_each - std::min(warm_credited, work_of.warm_each);
                 }
-                done++;
+                done++, work++;
                 continue;
             }
             // (its stage libraries are not built here any more, but by warm_libraries below, from the program cache: here
@@ -9759,7 +9781,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
                 for (Stage& st : p->stages)
                     if (st.module) vkDestroyShaderModule(dev.device, st.module, nullptr);
             }
-            done++;
+            done++, work++;
         }
     };
     std::vector<std::thread> threads;
@@ -9772,7 +9794,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
              segment_heap() ? "the segment heap: as many as the free memory allows" : "half the CPUs");
     for (unsigned i = 0; i < workers; i++) threads.emplace_back(worker);
     while (done.load() < total && !prepare_stopped()) {
-        if (progress) progress(done.load() / 3, programs);   // (in programs, as the log counts them, not programs times variants)
+        if (progress) progress(work_of.done(work.load()), programs);   // (in programs' worth, as the log counts them, PrepareWork)
         compute_compiles_log();
         Sleep(100);
         if (next.load() >= total + threads.size()) break;
@@ -9798,7 +9820,15 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
         const size_t before = libs.load();
         // (the programs the precompile keeps ready, and no others: on Mesa's Intel driver the listed ones, precompile_computes_which.
         // The rest are compiled at their first dispatch)
-        const size_t programs_warmed = warm_computes_apart(progress, warm_compute, only);
+        // (its count, in the programs it warms, onto the share of the bar the compute programs' compiles have: not a count of its
+        // own on the programs' part, which held the bar at what the translation had reached until it passed it)
+        const uint64_t translated_work = work.load(), warm_share = work_of.warm_each * warmed_computes;
+        const auto apart_progress = [&](size_t d, size_t t) {
+            if (!progress) return;
+            work.store(translated_work + (t ? warm_share * std::min(d, t) / t : warm_share));
+            progress(work_of.done(work.load()), programs);
+        };
+        const size_t programs_warmed = warm_computes_apart(apart_progress, warm_compute, only);
         logf("vk: preparation: the compute pipelines of %zu compute programs compiled for the driver's cache (%s): %zu variants on "
              "%u threads in %.1f s%s", programs_warmed, only ? "those the precompile keeps" : "every kept one",
              libs.load() - before, usable_cpus(), std::chrono::duration<double>(std::chrono::steady_clock::now() - w0).count(),

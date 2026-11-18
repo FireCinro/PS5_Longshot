@@ -1431,6 +1431,9 @@ void prepare_with_screen() {
             for (int k = 0; k < 3; k++) prep_guess[k].store(guess[k]);
         }
         if (update) prep_skip[0].store(true), prep_skip[1].store(true);
+        // (Compile shaders on Most, the default: no prediction runs, and its guess, half again the programs, is not in the total
+        // while the programs are prepared. Left in, it shrank their share of the bar, and the bar jumped once they were done)
+        if (!compile_all()) prep_skip[1].store(true);
         const bool prepared = !update && prepare_run(prep_progress, false);
         if (!prepared) prep_skip[0].store(true);
         // (a first start, or one after a start that did not finish them: the pipelines the notes predict, into the driver's cache)
@@ -1570,6 +1573,7 @@ bool started_up() {
             prepare_guess(guess);
             for (int k = 0; k < 3; k++) bar.guess(k, guess[k]);
         }
+        if (!compile_all()) bar.skip(1);   // (Most: no prediction, and no guess of it in the total while the programs run)
         part = 0;
         const bool prepared = prepare_run(progress, false, true);
         // (or the last run did not finish the prediction; Compile shaders on Most: never, compile_all)
