@@ -5,9 +5,13 @@
 # Guards (the PC is the user's, and one game runs at a time): no run while Rainbow Six Siege is open, nor while
 # another session's mkw.exe or longshot.exe runs (-Force overrides both); the game is stopped when its working set passes
 # -MaxGB. Delete work\runs\<name>\shots once the shots are looked at: they reach gigabytes.
+# -Graceful requires -Window: at the time limit ask the game to close, wait 10 s, and force only as a last resort.
+# A forced stop or a game's nonzero exit makes a graceful run fail; without -Graceful, existing stop behavior stays.
 param([int]$Seconds = 120, [string]$Name = "vk", [int]$ShotEvery = 300, [string]$Env = "", [switch]$Window,
-      [int]$MaxGB = 10, [switch]$Force, [switch]$Sound, [string]$Romfs = "", [string]$Priority = "High")
+      [int]$MaxGB = 10, [switch]$Force, [switch]$Sound, [string]$Romfs = "", [string]$Priority = "High",
+      [switch]$Graceful)
 $ErrorActionPreference = "Stop"
+if ($Graceful -and -not $Window) { "-Graceful requires -Window, so the game can receive a close request"; exit 2 }
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $Force) {
     if (Get-Process RainbowSix, RainbowSix_BE, RainbowSix_Vulkan -ErrorAction SilentlyContinue) {
@@ -47,7 +51,20 @@ for ($t = 0; $t -lt $Seconds; $t += 2) {
     if ($mb -gt $peak) { $peak = $mb }
     if ($mb -gt $MaxGB * 1024) { "memory guard: $mb MB, stopped"; break }
 }
-if (-not $exited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+if (-not $exited -and $Graceful) {
+    "time limit: asking the game window to close"
+    try {
+        if ($p.CloseMainWindow()) { $exited = $p.WaitForExit(10000) }
+    } catch {
+        $exited = $p.HasExited
+    }
+}
+if (-not $exited) {
+    Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+    if ($Graceful) { "graceful close did not complete; the game was stopped forcibly" }
+}
 "peak working set: $peak MB"
 $secs = [int]((Get-Date) - $t0).TotalSeconds
 "run '$Name': $secs s, " + $(if ($exited) { "exited with $($p.ExitCode)" } else { "stopped after $Seconds s" })
+if ($Graceful -and -not $exited) { exit 1 }
+if ($Graceful) { exit $p.ExitCode }
