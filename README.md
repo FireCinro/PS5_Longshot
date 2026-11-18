@@ -576,6 +576,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   Scarecrow's Song keeps the timing of its eight-note recording and playback above 60. Saved songs are not retimed;
   re-record a song after updating if its recorded rhythm was lost.
   Epona jumps fences above 60 as she does at 60 (she had galloped through them, more often the higher the cap).
+  The Shadow Temple's barge carries Link and the enemies on it above 60 as at 60 (above 100 FPS they slid to its back).
   **Uncapped** renders as fast as the PC can (the game still keeps real time). A display that waits for its refresh still
   holds the frames to its refresh rate: V-Sync on, or the driver's FIFO mode. `HOS_FPS_MAX=30` or `HOS_FPS_MAX=<61-1000>` sets a cap for one
   run.
