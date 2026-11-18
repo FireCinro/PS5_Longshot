@@ -153,7 +153,9 @@ there: its data stays in `LongshotLauncher-data` beside it.
 preparation builds:
 
 - **Most** (recommended, the default): every shader and the pipelines the game is known to use (the shipped list and
-  what your own play noted).
+  what your own play noted). Compute programs on those lists have all their texture variants warmed. An unlisted
+  compute program stays translated on disk and the driver builds its pipeline on first dispatch. With no compute
+  programs listed, preparation warms them all.
 - **All**: the predicted pipelines too, about 50,000 guesses at pipelines no list names. The preparation takes about 40%
   longer (415 s against 292 s on an RTX 3090 with a 12-core CPU), and play almost never uses them.
 

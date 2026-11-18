@@ -76,7 +76,9 @@ std::string pipe_notes_path() { return dir + "/longshot_pipelines.bin"; }
 std::string precompile_built_path() { return pipe_notes_path() + ".built"; }
 std::string predict_pending_path() { return pipe_notes_path() + ".predicting"; }
 std::string prepared_path() { return dir + "/longshot_prepared.bin"; }
-void precompile_built_write(size_t n) {
+struct Plan { uint64_t coverage() const { return 1; } };
+Plan compute_warm_plan() { return {}; }
+void precompile_built_write(size_t n, uint64_t) {
     if (FILE* f = fopen(precompile_built_path().c_str(), "wb")) fprintf(f, "%u\n", (unsigned)n), fclose(f);
 }
 void pcache_init() {}

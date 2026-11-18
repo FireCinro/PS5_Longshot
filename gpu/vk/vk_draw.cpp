@@ -1750,17 +1750,17 @@ FILE* note_file = nullptr;
 std::unordered_set<uint64_t> noted;   // (a pipeline once in the file, however many runs meet it)
 std::string pipe_notes_path() { return cache_path("longshot_pipelines.bin"); }
 /// (longshot) longshot_pipelines.bin.built: a precompile that got to its end built every note there was into the pipeline cache
-/// (its stamp, and how many). RX_VK_LOAD=create loads pipelines from the caches alone, and only once this says they are there.
+/// (its stamp, note count and compute coverage). RX_VK_LOAD=create loads pipelines from the caches alone, and only once this says they are there.
 /// What adds notes without building them (state_list_prepare) removes it; a note play adds was built by play, into its cache
 std::string precompile_built_path() { return pipe_notes_path() + ".built"; }
-void precompile_built_write(size_t notes) {
+void precompile_built_write(size_t notes, uint64_t compute_coverage) {
     // (not by a --prepare-shaders run: on NVIDIA the pipeline cache that process writes does not answer the play process
     // ("kept 0 of 32"), so the first play after a preparation found none of the noted pipelines in a cache and compiled them
     // in play with draws left out. Left unwritten, the first play start builds them itself, and its cache does answer)
     if (env_on("LONGSHOT_PREPARE_ONLY")) return;
     if (FILE* f = fopen(precompile_built_path().c_str(), "wb")) {
-        const uint64_t rec[2] = {program_cache_stamp(), (uint64_t)notes};
-        fwrite(rec, 8, 2, f);
+        const uint64_t rec[] = {program_cache_stamp(), (uint64_t)notes, compute_coverage};
+        fwrite(rec, sizeof rec, 1, f);
         fclose(f);
     }
 }
@@ -2152,14 +2152,27 @@ struct ComputePlan {
     bool all = false, none = false, learned_only = false;
     size_t shipped = 0, learned = 0;   // (the keys the shipped list names, and those play dispatched here)
     size_t fresh = 0;                  // (the shipped list's that this install's play has not dispatched)
+
+    // The play process's .built marker can satisfy a later Builder request if it
+    // warmed every compute, or the same set. The order of the list is immaterial.
+    static constexpr uint64_t every = 1;
+    uint64_t coverage() const {
+        if (all) return every;
+        uint64_t stamp = 0;
+        if (!none) {
+            std::vector<uint64_t> sorted(keys.begin(), keys.end());
+            std::sort(sorted.begin(), sorted.end());
+            for (const auto key : sorted) stamp = mix(stamp, key);
+        }
+        return stamp << 1;
+    }
 };
-/// RX_VK_PRECOMPILE_COMPUTES, as computes_plan reads it. Unset: "listed" on Mesa's Intel driver, all on a first start
-/// elsewhere. There every compute program on a first start was 4,058 programs and 9,691 variants for the driver, where the
-/// shipped list and this PC's play name about 230: the rest held the preparation for hours, and two of them were never
-/// built (compute_pin.h too_big). A program the list misses is made at its first dispatch, as any GPU's with "listed"
+// Most translates the whole seed and warms compute pipelines for programs seen in play. Without a usable list, computes_plan("listed") falls back to every kept program.
+bool compile_level_all();
 const char* precompile_computes_which() {
     if (const char* e = getenv("RX_VK_PRECOMPILE_COMPUTES")) return e;
-    return dev.driver_id == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA ? "listed" : nullptr;
+    if (dev.driver_id == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA || !compile_level_all()) return "listed";
+    return nullptr;
 }
 ComputePlan computes_plan(const char* which, bool state_lists) {
     ComputePlan plan;
@@ -2174,6 +2187,15 @@ ComputePlan computes_plan(const char* which, bool state_lists) {
     const bool listed = which && !strcmp(which, "listed");
     plan.all = which && !plan.learned_only && !listed ? !strcmp(which, "all") : listed ? plan.keys.empty() : !plan.learned;
     plan.none = !plan.all && which && !strcmp(which, "none");
+    return plan;
+}
+// Warming for the driver and keeping pipelines resident during play are separate.
+// On All the driver's warm includes every compute, even after this install has played.
+const ComputePlan& compute_warm_plan() {
+    static const ComputePlan plan = [] {
+        const char* which = precompile_computes_which();
+        return computes_plan(which ? which : "all", !env_on("RX_VK_NO_STATE_LIST"));
+    }();
     return plan;
 }
 std::mutex state_mu;
@@ -9709,9 +9731,14 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
         const char* e = getenv("RX_VK_COMPUTE_WARM_APART");
         return e ? !env_value_off(e) : dev.driver_id == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA;
     }();
+    // Use the same selection for a compile during translation and for the separate driver pass.
+    const std::unordered_set<uint64_t> none;
+    const ComputePlan* plan = warm_cs ? &compute_warm_plan() : nullptr;
+    const auto* only = !plan || plan->all ? nullptr : plan->none ? &none : &plan->keys;
     bool warming_apart = false;   // (the pass after the translation runs: warm_compute compiles)
     const auto warm_compute = [&](Program& p) {
         if (!warm_cs || taau_key(p.key) || (apart && !warming_apart)) return;
+        if (!apart && only && !only->count(p.key)) return;
         ensure_layout(p);
         // (as a dispatch, a load and the precompile ask for it: the same pin, so the same pipeline in the caches)
         const VkComputePipelineCreateInfo ci = compute_pipeline_info(p, true);
@@ -9804,9 +9831,6 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
         const size_t before = libs.load();
         // (the programs the precompile keeps ready, and no others: on Mesa's Intel driver the listed ones, precompile_computes_which.
         // The rest are compiled at their first dispatch)
-        const ComputePlan plan = computes_plan(precompile_computes_which(), !env_on("RX_VK_NO_STATE_LIST"));
-        const std::unordered_set<uint64_t> none;
-        const std::unordered_set<uint64_t>* only = plan.all ? nullptr : plan.none ? &none : &plan.keys;
         const size_t programs_warmed = warm_computes_apart(progress, warm_compute, only);
         logf("vk: preparation: the compute pipelines of %zu compute programs compiled for the driver's cache (%s): %zu variants on "
              "%u threads in %.1f s%s", programs_warmed, only ? "those the precompile keeps" : "every kept one",
@@ -9880,7 +9904,7 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
     const std::vector<NoteRef> refs = pipe_notes_refs();
     if (ended_inside >= 2) {
         remove(warming.c_str());
-        precompile_built_write(refs.size());
+        precompile_built_write(refs.size(), compute_warm_plan().coverage());
         logf("vk: precompile: the last two starts did not get through building the noted pipelines into the cache: left as they "
              "are, a pipeline the caches lack is made when it is first drawn");
         return;
@@ -9897,18 +9921,14 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
     const size_t total = refs.size();
     // (the compute pipelines after them, the plan's compute programs', counted in the progress from the start: reported as the
     // notes' total once those were done, the screen read "32,623 / 32,623", 100%, "a few seconds left" while they were built, #714)
-    // (longshot) Only those the precompile keeps where RX_VK_PRECOMPILE_COMPUTES says which, or its default does: on Mesa's
-    // Intel driver the listed ones (precompile_computes_which), as the preparation's own warm builds them. Every kept one there
-    // was 4,059 programs at a game's first start on an Iris Xe with 16 GB, the driver's compiles on 12 threads, and Linux killed
-    // the game for memory at 1,852 of them (#1344). A program left out is made at its first dispatch, as with "listed"
+    // Use the seed warm's selection here too. Compiling the rest at the next
+    // start would move the same work to the title screen.
     std::vector<uint64_t> computes = program_cache_compute_keys();
-    if (const char* which = precompile_computes_which()) {
-        const ComputePlan plan = computes_plan(which, !env_on("RX_VK_NO_STATE_LIST"));
-        if (!plan.all)
-            computes.erase(std::remove_if(computes.begin(), computes.end(),
-                                          [&](uint64_t k) { return plan.none || !plan.keys.count(k); }),
-                           computes.end());
-    }
+    const ComputePlan& plan = compute_warm_plan();
+    if (!plan.all)
+        computes.erase(std::remove_if(computes.begin(), computes.end(),
+                                      [&](uint64_t k) { return plan.none || !plan.keys.count(k); }),
+                       computes.end());
     const size_t all_n = total + computes.size();
     std::atomic<size_t> done{0}, built{0}, failed{0}, no_program{0};
     const std::string notes_path = pipe_notes_path();
@@ -9937,9 +9957,7 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
         if (progress) progress(done.load(), all_n);
         prepare_progress_log("noted pipelines", done.load(), total, t0, log_at);
     });
-    // (the compute pipelines too, the plan's compute programs' (precompile_computes_which: every kept one, the listed ones on
-    // Mesa's Intel driver): a first start in start mode makes them all, and a load at a create call only asks the caches, so on a new install a first dispatch found none (666 in one first session). Built
-    // into the cache and let go, as the noted ones; only once those are all done)
+    // Build the selected compute pipelines into the cache after the graphics notes.
     std::atomic<size_t> computes_done{0}, computes_built{0}, computes_failed{0};
     const auto c0 = std::chrono::steady_clock::now();
     warm_bounded::run(done == total && !prepare_stopped() ? computes.size() : 0, threads, [&](size_t i) {
@@ -9975,7 +9993,7 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
         logf("vk: precompile: the pipeline cache %s, in %.0f ms", precompile_save::said(pcache_save_outcome).c_str(),
              std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - s0).count());
         // (not by the preparation's own process: warm_bounded.h leaves_marker)
-        if (warm_bounded::leaves_marker(prepare_only, all, prepare_stopped())) precompile_built_write(total);
+        if (warm_bounded::leaves_marker(prepare_only, all, prepare_stopped())) precompile_built_write(total, compute_warm_plan().coverage());
         crash_markers::end(warming);
     }
     logf("vk: precompile: %zu noted pipelines of %zu programs and %zu compute pipelines of %zu compute programs built into the "
@@ -10248,7 +10266,8 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
     for (const auto& n : notes) wanted.insert(n->prog), wanted_variants.insert(mix(n->prog, n->variant));
     // (the compute programs: those this install's play dispatched (longshot_computes.bin) and those the shipped state list names,
     // each once; every kept one on a first start, with nothing dispatched yet: computes_plan)
-    const ComputePlan plan = computes_plan(precompile_computes_which(), !env_on("RX_VK_NO_STATE_LIST"));
+    const ComputePlan plan = env_on("LONGSHOT_PREPARE_ONLY") ? compute_warm_plan()
+        : computes_plan(precompile_computes_which(), !env_on("RX_VK_NO_STATE_LIST"));
     if (!plan.all && !plan.none) wanted.insert(plan.keys.begin(), plan.keys.end());
     std::vector<Program*> computes, fallbacks;
     std::unordered_set<uint64_t> listed_here;   // (the listed keys this install has a program of)
@@ -10418,7 +10437,7 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
     logf("vk: precompile: compute pipelines: %zu kept ready (%zu from the pipeline caches, %zu compiled now), %zu not made",
          cs_cached + cs_compiled, cs_cached, cs_compiled, cs_failed);
     // (every note built, by a run that got to its end: RX_VK_LOAD=create may load them from the caches from the next start on)
-    if (!gone_on && !prepare_stopped()) precompile_built_write(graphics_n);
+    if (!gone_on && !prepare_stopped()) precompile_built_write(graphics_n, plan.coverage());
     // (pipelines that took this long were compiled, not found: written before the title, the start-up screen saying so, as
     // precompile_warm does under RX_VK_LOAD=create; in play it would wait for 64 MB of growth: precompile_save.h)
     static const int save_s = precompile_save::after_s(getenv("RX_VK_PRECOMPILE_SAVE_S"));
@@ -10490,10 +10509,9 @@ bool predict_pending() {
 // options_path; 0 Most, the default; 1 All; any other number is Most). All builds the predicted pipelines too: about 50,000 for the driver's own cache, over 40 % more time (a full preparation on an RTX
 // 3090 with 24 threads: 415 and 413 s against 292 s without them), for pipelines play almost never draws ("vk: predicted
 // pipelines met in play"). RX_VK_COMPILE_SHADERS=all or most over the file (the game's --compile-shaders sets it, host/hos_main.c).
-// Asked only where a prediction would run: on Most it says so in the log, and takes away what an earlier preparation on All left
-// (the marker of one not finished, its sample and its keys), which would otherwise speak of pipelines this preparation did not
-// build
-bool compile_all() {
+// Compute selection also reads the level. Only the prediction path (compile_all below) clears an old prediction.
+namespace {
+bool compile_level_all() {
     static const bool all = [] {
         const char* why = "the default";
         int v = 0;
@@ -10521,11 +10539,19 @@ bool compile_all() {
         } else {
             logf("vk: Compile shaders: Most (%s): the predicted pipelines are left out; a pipeline no list names is made when it "
                  "is first drawn", why);
-            remove(predict_pending_path().c_str());
-            remove((pipe_notes_path() + ".predicted").c_str());
-            remove((pipe_notes_path() + ".predicted_keys").c_str());
         }
         return v != 0;
+    }();
+    return all;
+}
+} // namespace
+bool compile_all() {
+    static const bool all = [] {
+        if (compile_level_all()) return true;
+        remove(predict_pending_path().c_str());
+        remove((pipe_notes_path() + ".predicted").c_str());
+        remove((pipe_notes_path() + ".predicted_keys").c_str());
+        return false;
     }();
     return all;
 }
@@ -11488,12 +11514,17 @@ void pipeline_cache_play() {
 
 // ---- (longshot) What the programs' loader asks of the pipelines (vk_pipelines.h) ----
 bool precompile_covers_notes() {
-    uint64_t rec[2] = {0, 0};
+    uint64_t rec[3]{};
     FILE* f = fopen(precompile_built_path().c_str(), "rb");
     if (!f) return false;
-    const bool ok = fread(rec, 8, 2, f) == 2 && rec[0] == program_cache_stamp();
+    const size_t n = fread(rec, sizeof(*rec), 3, f);
     fclose(f);
-    return ok;
+    if (n < 2 || rec[0] != program_cache_stamp()) return false;
+    if (n == 3 && rec[2] == ComputePlan::every) return true;
+    // Play learns more keys as it dispatches them. Its usual start needn't repeat the warm
+    // each time that happens. A Builder must cover its current list, including a Most -> All upgrade.
+    if (env_on("LONGSHOT_PREPARE_ONLY")) return n == 3 && rec[2] == compute_warm_plan().coverage();
+    return n == 2 || !compute_warm_plan().all;
 }
 std::string pipe_notes_file() { return pipe_notes_path(); }
 std::vector<NoteRef> pipe_notes_refs() {

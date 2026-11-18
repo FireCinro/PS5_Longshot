@@ -19,7 +19,7 @@ def check_source():
     start = draw.index("void precompile_warm(void (*progress)(size_t done, size_t total)) {")
     warm = draw[start:draw.index("\n}\n", start)]
     for needle in ("warm_bounded::run(", "program_cache_borrow(", "vkDestroyPipeline(dev.device, made, nullptr);",
-                   "warm_bounded::leaves_marker(prepare_only, all, prepare_stopped())) precompile_built_write(total);",
+                   "warm_bounded::leaves_marker(prepare_only, all, prepare_stopped())) precompile_built_write(total, compute_warm_plan().coverage());",
                    'static const bool prepare_only = env_on("LONGSHOT_PREPARE_ONLY");',
                    "program_cache_compute_keys()", "cached_compute(&ci, &made)"):
         if needle not in warm:
