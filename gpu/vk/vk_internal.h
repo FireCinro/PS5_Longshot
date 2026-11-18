@@ -482,7 +482,8 @@ int shot_ask_next(const char* path, void (*done)(void* ctx, int64_t present, int
 bool create_swapchain(uint32_t width, uint32_t height);
 void present_thread_drain();   // (vk_replay.cpp: the presenter thread's present made, RX_VK_PRESENT_THREAD)
 int swapchain_framegen();   // (vk_main.cpp: frame generation's fixed multiplier as the swapchain is made for it, 0 none)
-/// (longshot) present_image's frame slots (vk_replay.cpp frames[]), at most; ImGui keeps one more vertex buffer (vk_imgui.cpp)
+/// (longshot) present_image's frame slots (vk_replay.cpp frames[]), at most; ImGui keeps one more vertex buffer, and the
+/// overlays keep what they let go one more present (vk_imgui.cpp ImageCount, kFramesLater)
 constexpr int kPresentSlotsMax = 8;
 int present_slots_for(int framegen, bool two_sets);   // (vk_replay.cpp: the slots present_image uses; create_swapchain's)
 bool swapchain_dlssg();     // (vk_main.cpp: and DLSS-G makes its sets: V-Sync Auto's FIFO)

@@ -347,7 +347,11 @@ rate. `tests/test_framegen_fixed_pace.py` runs the timing functions through a mo
    game's work queued before it, while frames of the shown set were due. The slot count is the swapchain's
    (`dev.swap_slots`), set when it is made for its sets, in every present mode; `RX_VK_FG_TIMELINE=0` keeps 3. An app may hold at most
    imageCount - minImageCount acquired images (an NVIDIA surface: 8 images, 6 spare): the next set's copies go as images
-   come free (`copy_up_to`), never all or none.
+   come free (`copy_up_to`), never all or none. The slots are also how many copies may still be on the GPU: what a copy
+   reads lives through `kPresentSlotsMax` presents after it (the overlays' staging buffers and old textures,
+   `gpu/vk/vk_imgui.cpp` `kFramesLater`; Dear ImGui's vertex buffers, `ImageCount`). At 4, frame generation at 3x and up
+   let them go while copies could still read them (a test-only log showed it on an RTX 5090; a likely cause of a
+   tester's lost device on an RTX 5080, not reproduced).
 5. **A present waits on the queue it is made on.** On the replay's graphics queue it waits behind the game's next frame (3 to
    12 ms at 5120x2160), and a second queue of the graphics family takes turns with it on the GPU. A compute family's queue
    runs beside it (`RX_VK_PRESENT_QUEUE`, `vk_main.cpp` `create_device`): 0.1% of the frames under 2 ms, on the screen 4.9
