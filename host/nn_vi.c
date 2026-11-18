@@ -380,6 +380,15 @@ uint32_t hos_frame_whole(uint64_t at, uint32_t amount_bits) {
     ReleaseSRWLockExclusive(&frame_whole_lock);
     return whole;
 }
+/* (the same for a counter that runs `times` substeps a frame: the whole substeps, so a frame above 60 fps runs some of them
+   instead of all or none) */
+uint32_t hos_frame_whole_times(uint64_t at, uint32_t amount_bits, uint32_t times) {
+    AcquireSRWLockExclusive(&frame_whole_lock);
+    const uint32_t whole = frame_whole_times(&frame_whole_state, at, amount_bits, times,
+                                             __atomic_load_n(&hos_frame_seconds_bits, __ATOMIC_RELAXED) != 0);
+    ReleaseSRWLockExclusive(&frame_whole_lock);
+    return whole;
+}
 volatile uint64_t hos_res_module = 0;   /* (f_831f3200's object, whose +0xe5c is the 3D's scale: nx2/oot_patches.py) */
 /* Quantize the time step to the engine's integer nominal rate. Keep debt from a short frame even when the minimum
    step is 1/60: discarding it made alternating short/long frames advance more game time than elapsed wall time.
