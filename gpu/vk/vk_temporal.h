@@ -71,8 +71,8 @@ int temporal_hidden_mesh_mode();
 /// (longshot, #1370) Whether `depth` is the depth target of the scene the chain has taken in this frame (its camera's)
 bool temporal_scene_depth_is(const Texture* depth);
 
-/// (longshot) NVIDIA DLAA before the game's bloom and tone map (pre_bloom.h has where and why): on by default with DLAA;
-/// RX_VK_DLSS_PRE_BLOOM=0 keeps it at the gameplay upscale, after them, as before. A draw of program key that samples what its
+/// (longshot) NVIDIA DLAA before the game's bloom and tone map (pre_bloom.h has where and why): with DLAA and
+/// RX_VK_DLSS_PRE_BLOOM=1 only; unset, DLAA stays at the gameplay upscale, after them. A draw of program key that samples what its
 /// descriptors list (sampled: vk_draw.cpp gfx_sampled) and draws into colors (n of them): the frame's passes for the learning,
 /// and at the learned one DLAA on the scene's linear colour, its picture written back into the scene before that draw reads it
 /// (outside a pass: the open one is ended first). The gameplay upscale then copies its input (temporal_upscale). Without DLAA

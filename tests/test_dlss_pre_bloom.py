@@ -64,9 +64,9 @@ def check_sources():
     assert "present_native_pq.load(std::memory_order_relaxed) || temporal_hdr_input()" in prepare, \
         "vk_dlss.cpp prepare: an HDR feature for the scene's linear colour"
 
-    assert "SW(RX_VK_DLSS_PRE_BLOOM, kill, bool," in switches, "switches.def: RX_VK_DLSS_PRE_BLOOM's row"
+    assert "SW(RX_VK_DLSS_PRE_BLOOM, attempt, bool," in switches, "switches.def: RX_VK_DLSS_PRE_BLOOM's row"
     wanted = block(chain, "bool pre_bloom_wanted(int mode)")
-    assert 'env_switch("RX_VK_DLSS_PRE_BLOOM") != 0' in wanted, "pre_bloom_wanted: on unless =0"
+    assert 'env_switch("RX_VK_DLSS_PRE_BLOOM") == 1' in wanted, "pre_bloom_wanted: off unless =1"
     assert 'env_switch("RX_VK_PARALLEL") >= 2' in wanted, "pre_bloom_wanted: off with the parallel replay"
     assert "mode == ur::DLAA" in wanted, "pre_bloom_wanted: DLAA only"
 

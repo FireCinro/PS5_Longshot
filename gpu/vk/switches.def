@@ -312,7 +312,7 @@ SW(RX_VK_DLSS_JITTER, kill, bool, "on: the camera is jittered while a temporal e
 SW(RX_VK_DLSS_LOD_OFFSET, tune, float, "-1", "DLSS's LOD bias offset in mip steps, clamped to -3..0 (0: the render size's own detail).")
 SW(RX_VK_DLSS_LOG, diag, bool, "off (NGX writes its own log files only)", "1 sends NGX's own log lines into the renderer's log instead of NGX's files.")
 SW(RX_VK_DLSS_PRESET, player, string, "the DLSS model row's preset (K, or E under 7 GB of VRAM)", "A preset letter (or 0 for NVIDIA's default) over the DLSS model menu row for one run.")
-SW(RX_VK_DLSS_PRE_BLOOM, kill, bool, "on: NVIDIA DLAA runs on the scene's linear colour before the game's bloom and tone map, the network's place a copy", "=0 runs DLAA at the gameplay upscale, after the bloom and the tone map, as before.")
+SW(RX_VK_DLSS_PRE_BLOOM, attempt, bool, "off: NVIDIA DLAA runs at the gameplay upscale, after the game's bloom and tone map", "=1 runs DLAA on the scene's linear colour before the game's bloom and tone map, the network's place a copy (off by default: players saw the game's camera turn under Link with it on).")
 SW(RX_VK_DLSS_TRACE, diag, int, "0: off", "Every <n> frames, logs one frame's draws into scene-sized targets for the temporal upscaler's motion.")
 SW(RX_VK_DMABUF_PIECE_MB, tune, int, "udmabuf's size limit from /sys (64 MB unless raised)", "Caps each dma-buf piece of a pool at n MB, to try the sparse multi-piece path with the kernel limit raised.")
 SW(RX_VK_DRAW_STATS, diag, string, "unset: no statistics", "Names a folder: one measured frame's per-draw statistics and the wanted programs' descriptors and buffers are written there.")

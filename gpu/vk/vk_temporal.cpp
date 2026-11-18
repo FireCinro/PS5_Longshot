@@ -30,7 +30,8 @@
 //    (temporal_pre_bloom; pre_bloom.h has the frame's passes and how the place is learned): on the scene's linear colour, a
 //    feature made for HDR colour with its own exposure, its picture written back into the scene. The bloom, the tone map and
 //    the passes after them then take the anti-aliased scene, and the network's dispatch becomes a copy, as with the Upscaler's
-//    Off at 100%. A frame with no learned place runs it at the network as before. RX_VK_DLSS_PRE_BLOOM=0: at the network always.
+//    Off at 100%. A frame with no learned place runs it at the network as before. Only with RX_VK_DLSS_PRE_BLOOM=1: off by
+//    default since players saw the game's camera turn under Link with it on (v3.0.0-rc.8), its cause not yet found.
 // Anything unexpected (no camera this frame, other sizes, the engine not there or failing) leaves the network to run, the
 // reason in the log when it changes.
 // Unless RX_VK_PSYCHOV35_DLSS=0, also takes Native PsychoV35's RGBA16F input/output with the supported HDR engines
@@ -139,18 +140,18 @@ bool temporal_off() { return opts.dlss == ur::OFF && temporal_mode() == ur::GAME
 bool temporal_full_scale() { return ur::full_scale(temporal_mode()); }
 
 namespace {
-/// (longshot) DLAA before the game's bloom and tone map (temporal_pre_bloom) in this run, the mode being DLAA: unless
-/// RX_VK_DLSS_PRE_BLOOM=0, and not with the parallel replay (RX_VK_PARALLEL=2 and more), whose threads record a frame's
-/// passes out of order. Read once; the first call logs which
+/// (longshot) DLAA before the game's bloom and tone map (temporal_pre_bloom) in this run, the mode being DLAA: with
+/// RX_VK_DLSS_PRE_BLOOM=1 only (off by default: the game's camera turned under Link with it on), and not with the
+/// parallel replay (RX_VK_PARALLEL=2 and more), whose threads record a frame's passes out of order. Read once; the first
+/// call logs which
 bool pre_bloom_wanted(int mode) {
     static const bool on = [] {
-        const bool asked = env_switch("RX_VK_DLSS_PRE_BLOOM") != 0;   // (unset: on)
+        const bool asked = env_switch("RX_VK_DLSS_PRE_BLOOM") == 1;   // (unset: off)
         const bool parallel = env_switch("RX_VK_PARALLEL") >= 2;
-        logf("vk: upscaler: NVIDIA DLAA %s", !asked    ? "after the game's bloom and tone map (RX_VK_DLSS_PRE_BLOOM=0)"
+        logf("vk: upscaler: NVIDIA DLAA %s", !asked    ? "after the game's bloom and tone map (RX_VK_DLSS_PRE_BLOOM=1: before them)"
                                              : parallel ? "after the game's bloom and tone map: the parallel replay is on "
                                                           "(RX_VK_PARALLEL)"
-                                                        : "before the game's bloom and tone map (RX_VK_DLSS_PRE_BLOOM=0: after "
-                                                          "them)");
+                                                        : "before the game's bloom and tone map (RX_VK_DLSS_PRE_BLOOM=1)");
         return asked && !parallel;
     }();
     return on && mode == ur::DLAA;
