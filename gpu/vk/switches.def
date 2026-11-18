@@ -640,7 +640,7 @@ SW(RX_VK_TAAU_FXAA, kill, int, "1: FXAA in the stand-in's shader", "0 gives the 
 SW(RX_VK_TAAU_KEYS, hw, string, "fd029a317a9a4b94 where the network runs on software multiplies (or RX_VK_NO_F16), else '-' (the network runs)", "Program key prefixes whose upscale network is replaced by the renderer's TAAU stand-in; '-' replaces none.")
 SW(RX_VK_TARGET_POOL_MB, hw, int, "a twelfth of the VRAM the driver allows, 256 to 768 MB", "Cap, in MB, on the pool of render targets kept for reuse.")
 SW(RX_VK_TASK_CAP, tune, int, "0: one mesh workgroup per task thread", "Caps how many mesh workgroups a task program may start at <n> instead of one per task thread.")
-SW(RX_VK_TASK_MESH_FALLBACK, hw, bool, "on for AMD Navi 21-23 (RDNA 2) on Windows, off elsewhere; off with RX_VK_MESH_SHADERS=native", "1 runs task + mesh draws through the compute fallback on a GPU with mesh shaders; 0 uses the driver's mesh shaders.")
+SW(RX_VK_TASK_MESH_FALLBACK, hw, bool, "on for AMD Navi 21-23 (RDNA 2) on Windows, off elsewhere; off with RX_VK_MESH_SHADERS=native", "1 runs task + mesh draws through the compute fallback on a GPU with mesh shaders, including mesh-only draws on Windows Navi 21-23; 0 uses the driver's mesh shaders.")
 SW(RX_VK_TEST_ALLOWED_FILE, diag, string, "off", "Reads the VRAM allowance cap in MB from a file once a second, so a test can shrink it during play.")
 SW(RX_VK_TEST_ALLOWED_FOLLOW, diag, bool, "off", "With a test allowance set, reports an exceeded allowance as the count itself, imitating AMD's Windows driver.")
 SW(RX_VK_TEST_ALLOWED_MB, diag, int, "off: the driver's allowance is used", "Caps the VRAM allowance the renderer sees at n MB, so a big card exercises a small card's eviction paths.")
