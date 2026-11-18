@@ -5530,7 +5530,14 @@ void retired_imports_give_back() {   // (pools_mu held)
         }
         retired_alive++, retired_bytes += p.hi - p.lo;
     }
-    account_publish(live_bytes, retired_bytes);
+    // (the budget line's copy, every 64th part: it is read every 600 presents, and the live pools are walked for it only then,
+    // not at every part)
+    static uint64_t publish_parts;
+    if (publish_parts++ % 64 == 0) {
+        uint64_t live = 0;
+        for (auto& [lo, p] : imported) live += p.hi - p.lo;
+        account_publish(live, retired_bytes);
+    }
     static uint64_t logged_epoch;
     if (mirror_epoch - logged_epoch >= 1200) {
         logged_epoch = mirror_epoch;
