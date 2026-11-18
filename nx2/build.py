@@ -557,7 +557,12 @@ FSR = os.environ.get("LONGSHOT_FSR", "") == "1"
 TRACY = os.environ.get("LONGSHOT_TRACY", "") == "1"
 TRACY_PUBLIC = os.path.normpath(os.path.join(kit.HERE, "..", "third_party", "tracy", "public"))
 TRACY_FLAGS = ["-DTRACY_ENABLE", "-DTRACY_ON_DEMAND", "-DTRACY_ONLY_LOCALHOST", "-DTRACY_NO_BROADCAST",
-               "-DTRACY_NO_CRASH_HANDLER", "-DTRACY_NO_CODE_TRANSFER", "-DTRACY_DELAYED_INIT", "-DTRACY_MANUAL_LIFETIME", "-DTRACY_FIBERS", "-fno-omit-frame-pointer", "-I" + TRACY_PUBLIC] if TRACY else []
+               "-DTRACY_NO_CRASH_HANDLER", "-DTRACY_NO_CODE_TRANSFER", "-DTRACY_DELAYED_INIT", "-DTRACY_MANUAL_LIFETIME", "-fno-omit-frame-pointer", "-I" + TRACY_PUBLIC] if TRACY else []
+# (LONGSHOT_TRACY_FIBERS=1 with it: the game's fibers told to Tracy, TRACY_FIBERS. Every zone then goes through one queue
+# under a lock, which costs a capture much of its frame rate: only for a capture whose zones cross a fiber's move
+# between threads)
+if TRACY and os.environ.get("LONGSHOT_TRACY_FIBERS", "") == "1":
+    TRACY_FLAGS = ["-DTRACY_FIBERS"] + TRACY_FLAGS
 TRACY_IMPLIB = "longshot_tracy.lib"   # (Windows: the executable's import library, which the back end's module links)
 
 

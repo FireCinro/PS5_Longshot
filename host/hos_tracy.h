@@ -81,9 +81,14 @@ static inline void ht_zone_end_(TracyCZoneCtx *z) { ___tracy_emit_zone_end(*z); 
 #define HT_PLOT(name, v) do { if (HT_ON) ___tracy_emit_plot(name, (double)(v)); } while (0)
 #define HT_THREAD_NAME(name) do { if (HT_ON) ___tracy_set_thread_name(name); } while (0)
 /* (the game's fibers, nn::os::SwitchToFiber: the zones after an enter are that fiber's, after a leave the thread's own) */
+#ifdef TRACY_FIBERS   /* (a build with LONGSHOT_TRACY_FIBERS=1 too: nx2/build.py) */
 #define HT_FIBER_ENTER(name) do { if (HT_ON) ___tracy_fiber_enter(name); } while (0)
 #define HT_FIBER_LEAVE() do { if (HT_ON) ___tracy_fiber_leave(); } while (0)
-/* (the lifted game code's zones, nx2/tracy_funcs.py: on with HOS_TRACY_GAME=1, read at the start) */
+#else
+#define HT_FIBER_ENTER(name) do {} while (0)
+#define HT_FIBER_LEAVE() do {} while (0)
+#endif
+/* (the lifted game code's zones, nx2/tracy_funcs.py: off with HOS_TRACY_GAME=0, read at the start) */
 #ifndef TRACY_IMPORTS
 #ifdef __cplusplus
 extern "C" int hos_tracy_game_on;

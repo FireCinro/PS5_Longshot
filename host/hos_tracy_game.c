@@ -25,11 +25,9 @@
 int hos_tracy_started, hos_tracy_game_on;
 void hos_tracy_start(void) {
     const char *e = getenv("HOS_TRACY_GAME");
-    /* (1: the listed functions' zones, 2: their indirect calls'. Off unless HOS_TRACY_GAME asks: =1 both, =funcs or
-       =calls that kind alone. Off by default until a capture with both holds: Tracy stopped one with "Invalid order of
-       zone begin and end events" a few milliseconds in, and the check below is there to say which zone it was) */
-    hos_tracy_game_on = !e || !*e || e[0] == '0' ? 0 : !strcmp(e, "funcs") ? 1 : !strcmp(e, "calls") ? 2 :
-                        !strcmp(e, "calls-notext") ? 6 : 3;
+    /* (1: the listed functions' zones, 2: their indirect calls'. Both unless HOS_TRACY_GAME says: =0 none, =funcs or
+       =calls that kind alone) */
+    hos_tracy_game_on = !e || !*e ? 3 : e[0] == '0' ? 0 : !strcmp(e, "funcs") ? 1 : !strcmp(e, "calls") ? 2 : 3;
     ___tracy_startup_profiler();
     hos_tracy_started = 1;
 }
@@ -117,18 +115,27 @@ void hos_tracy_fn_end(TracyCZoneCtx *z) {
     ___tracy_emit_zone_end(*z);
 }
 /* a dispatch point's indirect call (the header nx2/tracy_funcs.py compiles its chunk with): the zone around it */
-TracyCZoneCtx hos_tracy_call_begin(Ctx *c, uint64_t target) {
+/* (the lifted chunk sees nothing of Tracy, so the zone goes to it and back as 16 bytes of its own, HtCallZone in the
+   generated header: Tracy's context has another layout with TRACY_ON_DEMAND than without, and a chunk that held it
+   as the smaller one lost each zone's end, which is what stopped the first captures: "Invalid order of zone begin and
+   end events") */
+typedef struct { uint64_t w[2]; } HtCallZone;
+_Static_assert(sizeof(TracyCZoneCtx) <= sizeof(HtCallZone), "Tracy's zone context fits the lifted code's 16 bytes");
+HtCallZone hos_tracy_call_begin(Ctx *c, uint64_t target) {
     HT_SRCLOC struct ___tracy_source_location_data loc = { "game call", __func__, __FILE__, (uint32_t)__LINE__, HT_COLOR_GAME };
+    HtCallZone held = {{0, 0}};
     TracyCZoneCtx z = ___tracy_emit_zone_begin(&loc, hos_tracy_started && (hos_tracy_game_on & 2) ? 1 : 0);
     if (z.active) {
         opened(z, target, c->x[30]);
-        if (!(hos_tracy_game_on & 4))
-            HT_ZONE_TEXTF(z, "f_%llx %s, from %#llx", (unsigned long long)target, object_name(c->x[0]), (unsigned long long)c->x[30]);
+        HT_ZONE_TEXTF(z, "f_%llx %s, from %#llx", (unsigned long long)target, object_name(c->x[0]), (unsigned long long)c->x[30]);
     }
-    return z;
+    memcpy(&held, &z, sizeof z);
+    return held;
 }
-void hos_tracy_call_end(TracyCZoneCtx *z) {
-    if (z->active) closed(*z, "call");
-    ___tracy_emit_zone_end(*z);
+void hos_tracy_call_end(HtCallZone *held) {
+    TracyCZoneCtx z;
+    memcpy(&z, held, sizeof z);
+    if (z.active) closed(z, "call");
+    ___tracy_emit_zone_end(z);
 }
 #endif

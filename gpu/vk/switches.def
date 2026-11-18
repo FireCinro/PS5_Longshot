@@ -189,7 +189,7 @@ SW(HOS_TICK_CONVERT_192, kill, bool, "tick conversions use the counter's own 31.
 SW(HOS_TICK_LOG, diag, bool, "off", "Logs who reads the clock, by caller, every 5 s.")
 SW(HOS_TLS_TRACE, diag, bool, "off", "Logs thread-local storage setup, as HOS_TRACE does, without the rest of the trace.")
 SW(HOS_TRACE, diag, bool, "off", "Logs every HLE call that uses HOS_TRACE_CALL.")
-SW(HOS_TRACY_GAME, diag, enum, "off: a LONGSHOT_TRACY build records no zone of the lifted game code (no other build has them)", "=1 records the listed game functions' zones and their indirect calls' in a Tracy capture; funcs or calls: that kind alone.")
+SW(HOS_TRACY_GAME, diag, enum, "on in a LONGSHOT_TRACY build (no other build has the zones): the lifted game code's zones are recorded", "=0 leaves the listed game functions' zones and their indirect calls' out of a Tracy capture; funcs or calls: that kind alone.")
 SW(HOS_VCORES, kill, bool, "on: guest threads are scheduled on virtual cores", "=0 turns the virtual cores off.")
 SW(HOS_VCORE_ESCAPE_EQ_US, tune, int, "2000000 us (2 s)", "Sets how long a waiter waits for a holder of equal priority before it runs without a core.")
 SW(HOS_VCORE_ESCAPE_US, tune, int, "2000000 us (2 s)", "Sets how long a better-priority waiter waits for a core before it runs without one.")

@@ -49,13 +49,21 @@ game's environment and `-p <n>` give a second game a port of its own (8086 is th
 
 The client is started by the game's `main`, not before it (`TRACY_MANUAL_LIFETIME`): the crash window's helper is
 the same executable, and with a client of its own it took the next port and outlived the game, so a later capture
-connected to it and recorded nothing. The game's fibers (`nn::os::SwitchToFiber`) are told to Tracy
-(`TRACY_FIBERS`): a fiber has a row of its own, and its zones follow it from thread to thread.
+connected to it and recorded nothing.
+
+The game's fibers (`nn::os::SwitchToFiber`) are not told to Tracy unless the build also has
+`LONGSHOT_TRACY_FIBERS=1` (`TRACY_FIBERS`: a fiber gets a row of its own, and its zones follow it from thread to
+thread). With it every zone goes through one queue under a lock: a headless capture ran at 10 to 19 fps with it and
+36 without, so it is off. No zone was seen open across a fiber switch (`host/hos_thread.c` logs the first five
+that are: `tracy: a fiber switch ... with N game call zones open`); if a capture ever stops with "Invalid order of
+zone begin and end events", look for that line and build with the option.
 
 On Linux Tracy's own sampler (every thread's call stack, 10 kHz by default; `TRACY_SAMPLING_HZ=<n>` in the game's
 environment changes it) works for the game's own code as an ordinary user where `/proc/sys/kernel/perf_event_paranoid`
 is 2 or less. The lifted game code has no zones (hundreds of thousands of functions): the samples are how it shows,
-named `f_<guest address>` from the executable's symbols. Context switches, CPU usage of other programs and kernel
+meant to be named `f_<guest address>` from the executable's symbols. They are not yet: Tracy names a sampled address
+from debug information or the dynamic symbols, the executable has neither for the lifted code, and its samples show
+as `[unknown] + <address>` (exporting the names from a Tracy build's executable is being checked). Context switches, CPU usage of other programs and kernel
 frames need more than a user has (`perf_event_paranoid` of -1, or the game run with `CAP_PERFMON`/as root): without
 them the capture has none of those, and everything else.
 
@@ -96,11 +104,8 @@ Not there: Vulkan GPU zones for the passes (`RX_VK_PASS_TIMING` has them, in the
 ## The game's own code
 
 The lifted game code is hundreds of thousands of functions, so it gets zones from a list (`nx2/tracy_funcs.py`; Linux,
-where the objects are ELF), in blue. **They are built into every Tracy build and recorded only with
-`HOS_TRACY_GAME=1`** (`funcs` or `calls`: one kind alone), and they are not yet proven: with both kinds on, Tracy
-stopped a capture a few milliseconds in ("Invalid order of zone begin and end events"), and with the calls alone
-`tracy-capture` crashed while saving. `host/hos_tracy_game.c` logs the first zones of its own that end out of turn
-(`tracy: a game zone ... ended out of turn`), to find which. The list:
+where the objects are ELF), in blue. `HOS_TRACY_GAME=0` leaves them out of a capture (`funcs` or `calls`: one
+kind alone). The list:
 
 ```
 <guest address> [calls] [the zone's name]
@@ -129,6 +134,12 @@ wins), for example the hottest functions of a profile. Such a list is made from 
 checkout. A function the translation does not define as a function of its own (a piece of a split giant, an address
 inside a function) is named in the build's log and left out.
 
+The check behind these zones (`host/hos_tracy_game.c`): each of them that ends while it is not the newest on its thread
+is logged (`tracy: a game zone ... ended out of turn`, the first eight), because Tracy stops a capture at the first
+such zone and does not say which. The lifted chunk sees nothing of Tracy: its zone travels through it as 16 bytes
+of the host's own (Tracy's zone context has one layout with `TRACY_ON_DEMAND` and another without, and a chunk
+compiled without the define lost every zone's end).
+
 Two limits. A zone ends when its function returns: where the game leaves a function by `longjmp` (its C++ exceptions
 do not exist here, `setjmp` does), a zone that was open stays open in the capture. And a function inlined by the
 compiler into a caller in its own chunk (the hot chunk at `-O2`) has no call to route through the zone there.
@@ -146,8 +157,9 @@ while none is.
 
 Without a viewer connected the zones record nothing. While one is, a capture costs frame rate (in a headless run
 here, about 65 fps before the capture and 15 to 19 during it with the per-draw zones on; a played session with
-`RX_VK_TRACY_DRAWS=0` ran at about 54 fps against about 70 without Tracy) and about 240,000 zones a second, a
-quarter of them the four per-draw ones: read the times as shares, not as an unprofiled frame's, and compare with
+`RX_VK_TRACY_DRAWS=0` ran at about 54 fps against about 70 without Tracy; those were builds with `TRACY_FIBERS`,
+see above: without it a headless capture with every zone on ran at 36 fps) and 240,000 to 550,000 zones a second,
+about 4 MB of file a second with everything on, a quarter of the zones the four per-draw ones: read the times as shares, not as an unprofiled frame's, and compare with
 `RX_VK_TRACY_DRAWS=0` before reading a per-draw number. `TRACY_NO_SAMPLING=1` in the game's environment turns
 Tracy's sampler off; `TRACY_SAMPLING_HZ=<n>` slows it. The
 profiling mode (`HOS_PROFILE=1`) can run at the same time: its sampler interrupts each thread every 2 ms and its pass

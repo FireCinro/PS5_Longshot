@@ -59,8 +59,8 @@ static int zones, ended, calls;
 #define A64_SITE_CALL(c, t, slow) do { calls++; } while (0)
 #define A64_ICALL(c, t) A64_SITE_CALL(c, t, a64_icall_site)
 %s
-HtCallZone hos_tracy_call_begin(Ctx *c, uint64_t target) { HtCallZone z = { 1, 1 }; (void)c; (void)target; zones++; return z; }
-void hos_tracy_call_end(HtCallZone *z) { ended += z->active; }
+HtCallZone hos_tracy_call_begin(Ctx *c, uint64_t target) { HtCallZone z = { { 1, 1 } }; (void)c; (void)target; zones++; return z; }
+void hos_tracy_call_end(HtCallZone *z) { ended += (int)z->w[1]; }
 int main(void) {
     Ctx ctx, *c = &ctx;
     c->x[30] = 0x8000100cULL; A64_ICALL(c, 0x9000);   /* (inside the listed function at 0x80001000, 0x40 long) */
