@@ -2003,6 +2003,7 @@ extern "C" int sceKernelUsleep(unsigned microseconds);
 extern "C" void hos_ps5_klog_now(const char* fmt, ...);
 extern "C" uint64_t hos_ps5_release_unused_direct_trylock(uint64_t keep_bytes);
 extern "C" void hos_ps5_write_crash_log(const char*, uintptr_t, uintptr_t, int, int, uint64_t);
+extern "C" void ps5_request_oom_shed(void);
 extern "C" void ps5_heap_trim(void) __attribute__((weak));   // (PS5_PayloadSDK 55a2de0 and later)
 static void ps5_new_waits() {
     using clk = std::chrono::steady_clock;
@@ -2012,6 +2013,7 @@ static void ps5_new_waits() {
         first = now;
         static std::atomic<int> told{0};
         if (told++ < 20) hos_ps5_klog_now("[ps5] operator new: no memory: waiting for some");
+        ps5_request_oom_shed();
         (void)hos_ps5_release_unused_direct_trylock(0);
         if (ps5_heap_trim) ps5_heap_trim();
     }

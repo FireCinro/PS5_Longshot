@@ -341,6 +341,10 @@ static void hos_vlog(int level, const char *fmt, va_list ap) {
     snprintf(raw, sizeof raw, "[hos %s] %s%s\n", cur ? cur->name : "host", log_level_tag(level), buf);
     /* (longshot) the player's user name out before anything has the line: players send their log in (host/log_redact.h) */
     hos_log_redact(line, sizeof line, raw);
+#ifdef __PROSPERO__
+    void hos_ps5_ring_append(const char *s, size_t len);
+    hos_ps5_ring_append(line, strlen(line));
+#endif
     extern volatile int hos_control_on;   /* (control.c: log lines for its subscribers) */
     if (hos_control_on) {
         void hos_control_log(const char *line);

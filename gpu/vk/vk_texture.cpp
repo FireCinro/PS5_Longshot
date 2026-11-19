@@ -97,9 +97,12 @@ namespace mkwvk {
 // renderer's largest kind and the only one a level may be left out of, is made at 128 texels at most (32 below half of it),
 // and evict_textures makes it again at its own size once more than the reserve and a quarter is free.
 uint64_t ps5_tex_reserve() {   // (vk_vma.cpp asks too)
-    static const uint64_t v = (uint64_t)(getenv("HOS_PS5_TEX_RESERVE_MB") ? atoi(getenv("HOS_PS5_TEX_RESERVE_MB")) : 1024) << 20;
+    static const uint64_t def = hos_ps5_direct_total() <= (12500ull << 20) ? 1536ull : 1024ull;
+    static const uint64_t v = (getenv("HOS_PS5_TEX_RESERVE_MB") ? (uint64_t)atoi(getenv("HOS_PS5_TEX_RESERVE_MB")) : def) << 20;
     return v;
 }
+static std::atomic<bool> ps5_oom_shed{false};
+extern "C" void ps5_request_oom_shed(void) { ps5_oom_shed.store(true, std::memory_order_release); }
 static std::atomic<uint64_t> ps5_pressed_n{0}, ps5_restored_n{0};
 #endif
 namespace {
@@ -5064,20 +5067,22 @@ void texture_frame(uint64_t completed) {
     {
         const uint64_t ps5_room = hos_ps5_direct_room();
         const uint64_t ps5_res = ps5_tex_reserve();
-        ps5_short = ps5_room < ps5_res;
-        ps5_critical = ps5_room < ps5_res / 2;
+        const bool oom_now = ps5_oom_shed.exchange(false, std::memory_order_acq_rel);
+        ps5_short = ps5_room < ps5_res || oom_now;
+        ps5_critical = ps5_room < std::min<uint64_t>(512ull << 20, ps5_res / 2) || oom_now;
         if (ps5_short) {
-            if (!linux_pressed) linux_entered_pressure = true;
+            if (!linux_pressed || oom_now) linux_entered_pressure = true;
             linux_pressed = true;
             pool_pressure = 2;
             pool_trim();
             compact.pressed = true;
             if (compact.next_check > frame_no) compact.next_check = frame_no;
-            linux_shortfall_bytes.store(ps5_res - ps5_room, std::memory_order_relaxed);
+            const uint64_t short_bytes = ps5_res > ps5_room ? (ps5_res - ps5_room) : (oom_now ? (512ull << 20) : 0);
+            linux_shortfall_bytes.store(short_bytes, std::memory_order_relaxed);
             linux_shortfall_seq.fetch_add(1, std::memory_order_release);
             static std::chrono::steady_clock::time_point ps5_trim_at{};
             const auto trim_now = std::chrono::steady_clock::now();
-            if (ps5_trim_at == std::chrono::steady_clock::time_point{} || trim_now - ps5_trim_at >= std::chrono::seconds(2)) {
+            if (oom_now || ps5_trim_at == std::chrono::steady_clock::time_point{} || trim_now - ps5_trim_at >= std::chrono::seconds(2)) {
                 ps5_trim_at = trim_now;
                 (void)hos_ps5_release_unused_direct_trylock(0);
                 if (ps5_heap_trim) ps5_heap_trim();
@@ -5795,7 +5800,8 @@ void texture_frame(uint64_t completed) {
         // before. On by default since 2026-11-09 (8 GB RTX 3070s still showed rainbow textures once VRAM filled, Discord): the VRAM it
         // costs is bounded (256 MB a texture) and a wrong texture is worse than a fuller budget. RX_VK_EVICT_UNFLUSHABLE=1: evicted, as before
         static const bool evict_unflushable = getenv("RX_VK_EVICT_UNFLUSHABLE") && atoi(getenv("RX_VK_EVICT_UNFLUSHABLE")) != 0;
-        if (!overwritten && tex->gpu_written && !tex->released && !evict_unflushable && tex->bytes < (256ull << 20) && !flushable(*tex)) {
+        if (!overwritten && tex->gpu_written && !tex->released && !evict_unflushable &&
+            !(ps5_critical && tex->bytes >= (8ull << 20)) && tex->bytes < (256ull << 20) && !flushable(*tex)) {
             static std::atomic<int> kept_logged{0};
             if (kept_logged.fetch_add(1) < 40)
                 logf("vk: texture #%u %#llx %ux%u x%u NVN %#x the GPU drew kept, not evicted: its texels cannot be written back",

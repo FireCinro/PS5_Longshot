@@ -50,8 +50,13 @@ int32_t sceKernelMprotect(const void *address, size_t bytes, int protection);
 
 static DWORD set_error(DWORD e) { SetLastError(e); return e; }
 int sceKernelDebugOutText(int channel, const char *text);
-static char klog_ring[16384];
+static char klog_ring[32768];
 static uint64_t klog_ring_written;
+void hos_ps5_ring_append(const char *s, size_t len) {
+    if (!s || !len) return;
+    const uint64_t pos = __atomic_fetch_add(&klog_ring_written, (uint64_t)len, __ATOMIC_RELAXED);
+    for (size_t i = 0; i < len; i++) klog_ring[(pos + (uint64_t)i) % sizeof klog_ring] = s[i];
+}
 /* A line straight to klog: standard error goes through the platform layer's pipe and thread, which a crash outruns */
 void hos_ps5_klog_now(const char *fmt, ...) {
     char line[320];
@@ -62,8 +67,7 @@ void hos_ps5_klog_now(const char *fmt, ...) {
     if (n < 0) return;
     if (n > (int)sizeof line - 2) n = (int)sizeof line - 2;
     line[n] = '\n', line[n + 1] = 0;
-    const uint64_t pos = __atomic_fetch_add(&klog_ring_written, (uint64_t)(n + 1), __ATOMIC_RELAXED);
-    for (int i = 0; i <= n; i++) klog_ring[(pos + (uint64_t)i) % sizeof klog_ring] = line[i];
+    hos_ps5_ring_append(line, (size_t)(n + 1));
     sceKernelDebugOutText(0, line);
 }
 
