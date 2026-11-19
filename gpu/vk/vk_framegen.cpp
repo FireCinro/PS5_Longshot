@@ -1237,12 +1237,15 @@ bool framegen_on() {
     const bool wanted = framegen_wanted(opts.framegen, allow) && !dev.offscreen && !fg.failed;
 #ifdef __PROSPERO__
     if (wanted) memory_level_tick();
-    if (!wanted || memory_level.load(std::memory_order_relaxed) >= 2) {
-        if (fg.init) release_when_off();
-        return false;
-    }
+    if (!wanted || memory_level.load(std::memory_order_relaxed) >= 2) return false;
 #endif
     return wanted;
+}
+
+void framegen_maybe_release() {
+#ifdef __PROSPERO__
+    if (fg.init && !framegen_on()) release_when_off();
+#endif
 }
 
 int framegen_memory_level() { return memory_level.load(std::memory_order_relaxed); }

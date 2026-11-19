@@ -3228,8 +3228,10 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
         v = step_output_choice(*r.value, dir);
         if (v == *r.value) return;
     }
+#ifndef __PROSPERO__
     // (longshot) Frame generation by where DLSS FG cannot run: FSR 3.1 FG (0; a 2 is the same) and Built-in FG (1)
     if (r.value == &opts.framegen_by && !framegen_by_dlss_offered()) v = (v % 2 + 2) % 2;
+#endif
     // (longshot) Frame generation while NVIDIA DLSS FG makes the frames ends at its runtime's most made frames + 1
     // (vk_framegen.h framegen_capped: 6x on an RTX 50's runtime, 2x on an RTX 40's), as if that were its last value. A saved
     // value past it shows as that top (tx_framegen), so an arrow (a step from the saved value) steps from the value shown;

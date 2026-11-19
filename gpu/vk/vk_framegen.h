@@ -6,6 +6,9 @@
 namespace mkwvk {
 
 bool framegen_on();
+/// (PS5) Releases frame interpolation's images when off, from the replay thread only (never from framegen_on(), which
+/// display_main/present_image also calls while holding a set busy)
+void framegen_maybe_release();
 /// (RX_VK_FG_LATENCY_LOG) Before the swapchain is destroyed (retire_swapchain): the log's waits for its presents end first
 void fg_latency_swapchain_gone();
 /// (longshot) Frame generation's setting as it runs: the Insert menu's (opts.framegen: 0 Off, 1 Auto, 2 to 8 a fixed
