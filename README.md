@@ -9,29 +9,36 @@
   <br>
 </h1>
 
-<h4 align="center">Longshot for the PlayStation 5: a supported console game running natively on the PS5, without emulation.
+<h4 align="center">Longshot for the PlayStation 5 (v3.0.0-ps5 Fork): merging MagicBeanDev/Longshot v3.0.0 into heydemoura/PS5_Longshot v0.1.3.
 </h4>
 
 <p align="center">
+  <a href="docs/FORK_CHANGES_VS_0.1.3.md"><b>Fork Changes vs. v0.1.3</b></a> |
+  <a href="docs/PS5_FSR4.md"><b>PS5 AMD FSR 4.1.2</b></a> |
   <a href="ps5/builder/README.md"><b>The PS5 Builder</b></a> |
   <a href="ps5/README.md"><b>The port</b></a> |
   <a href="https://longshot.magicbean.dev/">Longshot for PC (upstream)</a>
 </p>
 
+> [!NOTE]
+> **About this Fork & AI Disclosure:**
+> - This public repository is an experimental fork of [`heydemoura/PS5_Longshot`](https://github.com/heydemoura/PS5_Longshot) (`v0.1.3`) merged with upstream [`MagicBeanDev/Longshot`](https://git.magicbean.dev/MagicBeanDev/Longshot) **`v3.0.0`** (`09cbdd97`).
+> - **AI-Assisted Development:** Large parts of the v3.0.0 PS5 integration, memory/OOM fixes, performance tuning, shader/runtime workarounds, and debugging in this fork were **heavily developed using AI (Gemini 4 Neon and Gemini 4 Hydrogen)**, building on top of upstream commits (including earlier PRs co-authored with Claude Fable 5.2).
+> - **Full Comparison:** See **[docs/FORK_CHANGES_VS_0.1.3.md](docs/FORK_CHANGES_VS_0.1.3.md)** for all performance boosts, bug fixes, memory optimizations, FSR 4.1.2 Lite/INT8 backend details, and differences compared to `PS5_Longshot v0.1.3`.
+
 > [!IMPORTANT]
-> **This repository is the PlayStation 5 version of Longshot.** It is a port of
-> [Longshot](https://git.magicbean.dev/MagicBeanDev/Longshot) to the PS5, with
-> [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan) as its Vulkan driver, and it builds one thing: the PS5 title.
+> **This repository is the PlayStation 5 version of Longshot (source & builder only).** It merges
+> [Longshot v3.0.0](https://git.magicbean.dev/MagicBeanDev/Longshot) with [heydemoura/PS5_Longshot](https://github.com/heydemoura/PS5_Longshot) and
+> [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan) as its Vulkan driver, and it builds one thing: the PS5 title from your own copy of the game.
 >
-> **No PC builds of Longshot are included or released here.** There is no Windows or Linux game, launcher or builder
-> in this repository's releases. For Longshot on a PC, go to [Longshot itself](https://longshot.magicbean.dev/).
+> **No game files, keys, ROMs, `.nup` images, or built game executables are included or released here.** There is no Windows or Linux game in this repository. For Longshot on a PC, go to [Longshot itself](https://longshot.magicbean.dev/).
 >
-> What the releases here hold is the **Longshot PS5 Builder**: a desktop program for Linux (an AppImage) and Windows
-> (a portable folder) that makes the PS5 title folder from your own copy of the game, on your own computer. It holds
-> no game files.
+> What this fork provides is the source code and **Longshot PS5 Builder** tooling (`ps5/builder/`) that builds the `PPSA99025` PS5 title folder on your own computer from your own legal copy of the game.
 >
-> - Using it, and what it does: [ps5/builder/README.md](ps5/builder/README.md)
-> - The port: what runs, how it was measured, the console's profiles: [ps5/README.md](ps5/README.md)
+> - Fork changelog & performance/fix breakdown vs. `v0.1.3`: [docs/FORK_CHANGES_VS_0.1.3.md](docs/FORK_CHANGES_VS_0.1.3.md)
+> - Native static AMD FSR 4.1.2 (Lite / INT8) notes: [docs/PS5_FSR4.md](docs/PS5_FSR4.md)
+> - Using the builder, and what it does: [ps5/builder/README.md](ps5/builder/README.md)
+> - Original port bring-up notes & profiles: [ps5/README.md](ps5/README.md)
 >
 > It runs on the **PS5 Pro** and on the **base PS5** (PS5 and PS5 Slim): the builder asks which one the folder is for.
 >
@@ -85,7 +92,9 @@ what does not yet. Open problems are collected in tracking issues, linked below.
 Longshot for the PS5 does not come ready to play. The title is built **on your computer, from your own copy of the
 game**, by the **Longshot PS5 Builder**, then copied to the console.
 
-### [Download the Longshot PS5 Builder](https://github.com/heydemoura/PS5_Longshot/releases/latest)
+### Download or Build the Longshot PS5 Builder
+
+Check this fork's [Releases](../../releases) page (when published) or build the kit and packages from source following [ps5/builder/README.md](ps5/builder/README.md). *(Upstream `v0.1.3` releases live at [`heydemoura/PS5_Longshot`](https://github.com/heydemoura/PS5_Longshot/releases).)*
 
 | Your computer | File |
 |---|---|
@@ -223,11 +232,11 @@ or opens a page, Cross (the Switch's B) goes back or closes the menu.
 |---|---|
 | **Output resolution** (Graphics) | 1920x1080 by default. Choosing 2560x1440 switches the console to that display mode **at the next start**. Measured in Kokiri Forest on a Pro: 31 to 32 game frames a second at 1920x1080, 29 at 2560x1440. 3840x2160 works on a Pro too: played there, about 40 frames a second shown with frame generation on (seen in play, not from the log). |
 | **Quality preset** (Graphics) | "Auto" picks Balanced on the console: the full picture, not a reduced one. |
-| **Upscaler** (Graphics) | AMD FSR 3.1 from the next release on, where "Auto" chooses. The game's own network is still on the row. |
-| **Frame generation** (Graphics) | On, 2x, from the start: PS5_MihawkGen's network makes one frame between each two of the game's. |
+| **Upscaler** (Graphics) | Game's own upscaler, AMD FSR 3.1, or AMD FSR 4 (when user-supplied FSR 4 weights/SPIR-Vs are placed in `/app0/fsr4/`, see [docs/PS5_FSR4.md](docs/PS5_FSR4.md)). |
+| **Frame generation** (Graphics) | On, 2x (`MihawkGen FG`), from the start: `PS5_MihawkGen`'s network or built-in generator, with `Fill to 60 fps` (`Auto`) and automatic memory step-down supported. |
 | **Volume**, **Text speed**, **Field of view**, **Camera** rows | The game's own; nothing console-specific. |
 
-**What does not apply:** NVIDIA DLSS, AMD FSR 4, Intel XeSS, NVIDIA Reflex and AMD Anti-Lag (PC graphics cards'),
+**What does not apply:** NVIDIA DLSS, Intel XeSS, NVIDIA Reflex and AMD Anti-Lag (PC graphics cards'),
 Fullscreen and V-Sync (the console has one display mode at a time), the keyboard and mouse rows, the microphone, motion
 controls (the DualSense's sensors are not read yet) and the Discord status.
 
