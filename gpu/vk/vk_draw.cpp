@@ -9759,8 +9759,14 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
     // nothing: a kept library costs memory, and our pipeline cache would be read in whole at every start. A driver whose compiler
     // crashes on one of them (it happens: TotK Recomp's issue 30) would crash here at every start: the file says this step began and
     // did not end, and the next start goes without it. Those libraries are then built when a draw first needs them
+#ifdef __PROSPERO__
+    const bool no_warm = env_on("RX_VK_NO_WARM");
+    bool warm = !no_warm && libraries && !background;
+    bool warm_cs = !no_warm && !background;
+#else
     bool warm = libraries && !background;
     bool warm_cs = !background;
+#endif
     if (background) {
     } else if (FILE* f = fopen(warming.c_str(), "rb")) {
         fclose(f);
