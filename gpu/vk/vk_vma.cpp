@@ -261,10 +261,10 @@ uint64_t ps5_tex_reserve();                      // (vk_texture.cpp: what is kep
 static std::atomic<uint64_t> image_bytes[2]{};
 bool create_image(const VkImageCreateInfo& ci, VkImage& image, VmaAllocation& allocation, bool dedicated, bool target, bool textures) {
 #ifdef __PROSPERO__
-    // (PS5, memory short: transient render targets and images >= 256 KiB texels get memory of their own below reserve+512 MiB,
-    // which goes back to the console's pool the moment the image does instead of leaving half-empty VMA blocks in Hyrule Castle)
-    if (!dedicated && (target || (uint64_t)ci.extent.width * ci.extent.height * ci.extent.depth * ci.arrayLayers >= (256u << 10)) &&
-        hos_ps5_direct_room() < ps5_tex_reserve() + (512ull << 20))
+    // (PS5, memory short: large images >= 1 MiB texels (~4 MiB+) get memory of their own below reserve, returning directly to
+    // the kernel on destroy, while smaller transient targets stay in 16 MiB VMA blocks to avoid fragmenting physical memory)
+    if (!dedicated && (uint64_t)ci.extent.width * ci.extent.height * ci.extent.depth * ci.arrayLayers >= (1024u << 10) &&
+        hos_ps5_direct_room() < ps5_tex_reserve())
         dedicated = true;
 #endif
     const auto made = [&] {
@@ -501,7 +501,7 @@ void vma_log_heaps() {
 /// page found no memory.
 static uint64_t ps5_render_budget(uint64_t own) {
     static const bool base_ps5 = hos_ps5_direct_total() <= (12500ull << 20);
-    static const uint64_t cap = (getenv("HOS_PS5_RENDER_MB") ? (uint64_t)atoi(getenv("HOS_PS5_RENDER_MB")) : (base_ps5 ? 1792 : 2560)) << 20;
+    static const uint64_t cap = (getenv("HOS_PS5_RENDER_MB") ? (uint64_t)atoi(getenv("HOS_PS5_RENDER_MB")) : (base_ps5 ? 1536 : 2560)) << 20;
     static const uint64_t reserve = (getenv("HOS_PS5_RESERVE_MB") ? (uint64_t)atoi(getenv("HOS_PS5_RESERVE_MB")) : (base_ps5 ? 1792 : 2048)) << 20;
     // (PS5: use total free direct memory across all 2 MiB chunks, not largest contiguous block; subtract deficit below reserve
     // so Arbiter/vram_compact see used > allowed and fire pressure valves instead of sitting frozen at `own`)

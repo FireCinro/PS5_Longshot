@@ -9522,11 +9522,6 @@ bool prepare_is_update() {
     // (opt-in, RX_VK_PREPARE_BACKGROUND=1: when the translator changed, the program cache is gone too, and the first area then
     // translated thousands of programs in play: 1 fps and black frames for minutes, which looked broken. Before the game is the default)
     if (env_on("RX_VK_PREPARE_AGAIN") || !env_on("RX_VK_PREPARE_BACKGROUND")) return false;
-#ifdef __PROSPERO__
-    // (PS5: allow RX_VK_PREPARE_BACKGROUND=1 on a first prepare too so players can jump straight into play while shaders
-    // finish translating gently at idle priority behind the game)
-    return true;
-#endif
     FILE* f = fopen(prepared_path().c_str(), "rb");
     if (!f) return false;
     uint64_t have = 0;

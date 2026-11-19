@@ -101,17 +101,30 @@ static int reserve_window(void) {
     return 1;
 }
 
+#define RELEASE_CHUNK (2ULL << 20)
+#define RELEASE_UNITS (RELEASE_CHUNK / UNIT)
+
 /* n bytes of direct memory, contiguous in the current block or a new one of at least BLOCK; -1 when there is none */
 static int64_t direct_take(uint64_t n, uint64_t *got) {
     if (block_next >= block_end) {
         uint64_t size = n > BLOCK ? (n + BLOCK - 1) & ~(BLOCK - 1) : BLOCK;
         if (size > (1ULL << 30)) size = 1ULL << 30;   /* (a large commit takes 1 GiB blocks, one after another) */
         int64_t at = 0;
-        /* (fragmented: smaller, down to one unit. In Hyrule Castle Town 842 MiB were free in 203 pieces, the largest
-           under a block: a commit of 37 MiB found "no direct memory left" and the game wrote to the page it did not get) */
-        while (sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), size, UNIT, DIRECT_TYPE, &at)) {
-            if (size <= UNIT) return -1;
-            size = (size / 2 + UNIT - 1) & ~(UNIT - 1);
+        int ok = 0;
+        while (size >= RELEASE_CHUNK) {
+            if (sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), size, RELEASE_CHUNK, DIRECT_TYPE, &at) == 0) {
+                ok = 1;
+                break;
+            }
+            if (size == RELEASE_CHUNK) break;
+            size = (size / 2 + RELEASE_CHUNK - 1) & ~(RELEASE_CHUNK - 1);
+        }
+        if (!ok) {
+            size = RELEASE_CHUNK;
+            while (sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), size, UNIT, DIRECT_TYPE, &at)) {
+                if (size <= UNIT) return -1;
+                size = (size / 2 + UNIT - 1) & ~(UNIT - 1);
+            }
         }
         block_next = at, block_end = at + (int64_t)size;
     }
@@ -199,14 +212,18 @@ static void heapsort_i64(int64_t *a, size_t n) {
     }
 }
 
-/* Releases decommitted guest direct memory (and unused block tail when keep_bytes == 0) back to the kernel; window_lock held. */
+/* Releases >= 2 MiB aligned runs of decommitted guest direct memory (and aligned unused block tail when keep_bytes == 0)
+   back to the kernel without creating sub-2 MiB physical holes; window_lock held. */
 static uint64_t release_unused_direct_locked(uint64_t keep_bytes) {
     uint64_t released = 0;
     if (keep_bytes == 0 && block_end > block_next) {
-        const size_t tail = (size_t)(block_end - block_next);
-        if (sceKernelReleaseDirectMemory(block_next, tail) == 0) {
-            released += tail;
-            block_next = block_end = 0;
+        const int64_t tail_start = (block_next + (int64_t)(RELEASE_CHUNK - 1)) & ~(int64_t)(RELEASE_CHUNK - 1);
+        if (block_end > tail_start && (uint64_t)(block_end - tail_start) >= RELEASE_CHUNK) {
+            const size_t tail = (size_t)(block_end - tail_start) & ~(size_t)(RELEASE_CHUNK - 1);
+            if (tail >= RELEASE_CHUNK && sceKernelReleaseDirectMemory(tail_start, tail) == 0) {
+                released += tail;
+                block_end = tail_start;
+            }
         }
     }
     const size_t keep_units = (size_t)(keep_bytes / UNIT);
@@ -216,16 +233,20 @@ static uint64_t release_unused_direct_locked(uint64_t keep_bytes) {
         for (size_t i = 0; i < free_count;) {
             size_t j = i + 1;
             while (j < free_count && free_units[j] == free_units[j - 1] + (int64_t)UNIT) j++;
-            const size_t run_len = j - i;
+            size_t a = i;
+            while (a < j && (free_units[a] & (int64_t)(RELEASE_CHUNK - 1)) != 0) a++;
             const size_t avail_total = new_count + (free_count - i);
+            const size_t chunks = a < j ? (j - a) / RELEASE_UNITS : 0;
             size_t rel_n = 0;
-            if (avail_total > keep_units) {
-                const size_t excess = avail_total - keep_units;
-                rel_n = run_len < excess ? run_len : excess;
+            if (chunks > 0 && avail_total > keep_units) {
+                const size_t excess_chunks = (avail_total - keep_units) / RELEASE_UNITS;
+                const size_t want_chunks = chunks < excess_chunks ? chunks : excess_chunks;
+                rel_n = want_chunks * RELEASE_UNITS;
             }
-            if (rel_n > 0 && sceKernelReleaseDirectMemory(free_units[i], rel_n * UNIT) == 0) {
+            if (rel_n > 0 && sceKernelReleaseDirectMemory(free_units[a], rel_n * UNIT) == 0) {
                 released += (uint64_t)rel_n * UNIT;
-                for (size_t k = i + rel_n; k < j; k++) free_units[new_count++] = free_units[k];
+                for (size_t k = i; k < a; k++) free_units[new_count++] = free_units[k];
+                for (size_t k = a + rel_n; k < j; k++) free_units[new_count++] = free_units[k];
             } else {
                 for (size_t k = i; k < j; k++) free_units[new_count++] = free_units[k];
             }
@@ -388,9 +409,8 @@ int hos_ps5_decommit(void *addr, size_t size) {
         units += n;
         at += n * UNIT;
     }
-    if ((uint64_t)free_count * UNIT > (64ULL << 20) ||
-        ((uint64_t)free_count * UNIT > (16ULL << 20) && hos_ps5_direct_room() < (2048ULL << 20)))
-        (void)release_unused_direct_locked(16ULL << 20);
+    if ((uint64_t)free_count * UNIT > (64ULL << 20))
+        (void)release_unused_direct_locked(32ULL << 20);
     pthread_mutex_unlock(&window_lock);
     if (now_ms() - t0 >= 20) hos_ps5_klog_now("[ps5] guest decommit: %llu MiB given back in %.0f ms", (unsigned long long)(units * UNIT >> 20), now_ms() - t0);
     return 1;
