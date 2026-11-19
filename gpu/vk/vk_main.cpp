@@ -2001,6 +2001,8 @@ __attribute__((visibility("default")))
 // 150-300 MiB free seconds before. After 10 s of one wait the allocation throws as before
 extern "C" int sceKernelUsleep(unsigned microseconds);
 extern "C" void hos_ps5_klog_now(const char* fmt, ...);
+extern "C" uint64_t hos_ps5_release_unused_direct_trylock(uint64_t keep_bytes);
+extern "C" void hos_ps5_write_crash_log(const char*, uintptr_t, uintptr_t, int, int, uint64_t);
 extern "C" void ps5_heap_trim(void) __attribute__((weak));   // (PS5_PayloadSDK 55a2de0 and later)
 static void ps5_new_waits() {
     using clk = std::chrono::steady_clock;
@@ -2010,10 +2012,12 @@ static void ps5_new_waits() {
         first = now;
         static std::atomic<int> told{0};
         if (told++ < 20) hos_ps5_klog_now("[ps5] operator new: no memory: waiting for some");
+        (void)hos_ps5_release_unused_direct_trylock(0);
         if (ps5_heap_trim) ps5_heap_trim();
     }
     if (now - first > std::chrono::seconds(10)) {
         last = {};
+        hos_ps5_write_crash_log("operator new std::bad_alloc (10s wait exhausted)", 0, 0, 0, 0, 0);
         throw std::bad_alloc();
     }
     sceKernelUsleep(20000);

@@ -61,8 +61,12 @@ bool vma_init(PFN_vkGetInstanceProcAddr gipa) {
     ci.instance = dev.instance;
     ci.vulkanApiVersion = VK_API_VERSION_1_3;
     ci.pVulkanFunctions = &f;
-    // (64 MB blocks on > 8 GB cards; 32 MB on <= 8 GB cards to halve fragmentation in default heap 0 blocks)
+    // (64 MB blocks on > 8 GB cards; 32 MB on <= 8 GB cards and PS5 to halve fragmentation in default heap 0 blocks)
+#ifdef __PROSPERO__
+    ci.preferredLargeHeapBlockSize = 32ull << 20;
+#else
     ci.preferredLargeHeapBlockSize = device_local_heap_bytes() <= vram_compact::GLOBAL_MIN_GRAPHICS_REQ ? (32ull << 20) : (64ull << 20);
+#endif
     return vmaCreateAllocator(&ci, &vma) == VK_SUCCESS;
 }
 
@@ -99,8 +103,12 @@ VmaPool target_images_pool() {
     ai.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     uint32_t type = 0;
     if (vmaFindMemoryTypeIndexForImageInfo(vma, &rep, &ai, &type) != VK_SUCCESS) return VK_NULL_HANDLE;
+#ifdef __PROSPERO__
+    const uint64_t block_size = std::min<uint64_t>(kImageBlock, 16ull << 20);
+#else
     const uint64_t block_size =
         device_local_heap_bytes() <= vram_compact::GLOBAL_MIN_GRAPHICS_REQ ? std::min<uint64_t>(kImageBlock, 16ull << 20) : kImageBlock;
+#endif
     VmaPoolCreateInfo pi{};
     pi.memoryTypeIndex = type;
     pi.blockSize = block_size;
@@ -244,6 +252,7 @@ bool image_compact_pass_end(uint64_t* freed_bytes, uint32_t* freed_blocks) {
 
 #ifdef __PROSPERO__
 extern "C" uint64_t hos_ps5_direct_room(void);   // (host/ps5/win32_ps5.c: the title's free direct memory in all)
+extern "C" uint64_t hos_ps5_direct_total(void);
 uint64_t ps5_tex_reserve();                      // (vk_texture.cpp: what is kept free for the game)
 #endif
 // (mem_account.h) what every image made here takes, by its allocation: the textures', the render targets', the upscalers', the
@@ -252,12 +261,10 @@ uint64_t ps5_tex_reserve();                      // (vk_texture.cpp: what is kep
 static std::atomic<uint64_t> image_bytes[2]{};
 bool create_image(const VkImageCreateInfo& ci, VkImage& image, VmaAllocation& allocation, bool dedicated, bool target, bool textures) {
 #ifdef __PROSPERO__
-    // (PS5, memory short: an image of about 1 MB and up gets memory of its own, which goes back to the console's pool the
-    // moment the image does. In Hyrule Field 466 MB was free inside the blocks (640 MB of them for 382 MB of images, 416 for
-    // 208 MB of render targets) while the game's next page found none; smaller images stay in the blocks, a memory object
-    // each would be thousands)
-    if (!dedicated && (uint64_t)ci.extent.width * ci.extent.height * ci.extent.depth * ci.arrayLayers >= (256u << 10) &&
-        hos_ps5_direct_room() < ps5_tex_reserve())
+    // (PS5, memory short: transient render targets and images >= 256 KiB texels get memory of their own below reserve+512 MiB,
+    // which goes back to the console's pool the moment the image does instead of leaving half-empty VMA blocks in Hyrule Castle)
+    if (!dedicated && (target || (uint64_t)ci.extent.width * ci.extent.height * ci.extent.depth * ci.arrayLayers >= (256u << 10)) &&
+        hos_ps5_direct_room() < ps5_tex_reserve() + (512ull << 20))
         dedicated = true;
 #endif
     const auto made = [&] {
@@ -493,13 +500,16 @@ void vma_log_heaps() {
 /// already counted as the game's: the renderer grew to 3.3 GB of blocks with "8.3 of 8.6 GB" used while the game's next
 /// page found no memory.
 static uint64_t ps5_render_budget(uint64_t own) {
-    static const uint64_t cap = (getenv("HOS_PS5_RENDER_MB") ? (uint64_t)atoi(getenv("HOS_PS5_RENDER_MB")) : 2560) << 20;
-    static const uint64_t reserve = (getenv("HOS_PS5_RESERVE_MB") ? (uint64_t)atoi(getenv("HOS_PS5_RESERVE_MB")) : 2048) << 20;
-    // (PS5: use total free direct memory across all 2 MiB chunks, not largest contiguous block: fragmentation made
-    // hos_ps5_direct_free() drop under reserve and evict in-use textures while 1.5-2.7 GiB was still free)
+    static const bool base_ps5 = hos_ps5_direct_total() <= (12500ull << 20);
+    static const uint64_t cap = (getenv("HOS_PS5_RENDER_MB") ? (uint64_t)atoi(getenv("HOS_PS5_RENDER_MB")) : (base_ps5 ? 1792 : 2560)) << 20;
+    static const uint64_t reserve = (getenv("HOS_PS5_RESERVE_MB") ? (uint64_t)atoi(getenv("HOS_PS5_RESERVE_MB")) : (base_ps5 ? 1792 : 2048)) << 20;
+    // (PS5: use total free direct memory across all 2 MiB chunks, not largest contiguous block; subtract deficit below reserve
+    // so Arbiter/vram_compact see used > allowed and fire pressure valves instead of sitting frozen at `own`)
     const uint64_t free_now = hos_ps5_direct_room();
-    const uint64_t room = own + (free_now > reserve ? free_now - reserve : 0);
-    return std::min(cap, room);
+    const uint64_t room = free_now >= reserve
+        ? own + (free_now - reserve)
+        : (own > (reserve - free_now) ? own - (reserve - free_now) : 0);
+    return std::clamp<uint64_t>(room, 128ull << 20, cap);
 }
 #endif
 bool vram_usage(uint64_t* used, uint64_t* budget, uint64_t* block_free) {

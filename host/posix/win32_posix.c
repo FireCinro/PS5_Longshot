@@ -1594,10 +1594,13 @@ static void on_signal(int sig, siginfo_t *si, void *uctx) {
 #ifdef __PROSPERO__
     {   /* (said at once: the crash report's own lines go through a pipe the process's end can outrun) */
         void hos_ps5_klog_now(const char *fmt, ...);
+        void hos_ps5_write_crash_log(const char *reason, uintptr_t rip, uintptr_t addr, int sig, int is_write, uint64_t mc_err);
         uintptr_t hos_ps5_exe_base(void);
         hos_ps5_klog_now("[ps5] unhandled signal %d at eboot+%#lx, address %#lx (%s, mc_err %#lx)", sig,
                          (unsigned long)((uintptr_t)uc->uc_mcontext.mc_rip - hos_ps5_exe_base()), (unsigned long)si->si_addr,
                          HOS_FAULT_WRITE(uc) ? "write" : "read", (unsigned long)uc->uc_mcontext.mc_err);
+        hos_ps5_write_crash_log("unhandled signal", (uintptr_t)uc->uc_mcontext.mc_rip, (uintptr_t)si->si_addr, sig,
+                                HOS_FAULT_WRITE(uc) ? 1 : 0, (uint64_t)uc->uc_mcontext.mc_err);
     }
 #endif
     /* not ours: whoever had the signal before, else the default (the fault comes again and ends the process) */

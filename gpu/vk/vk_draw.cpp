@@ -9516,6 +9516,7 @@ uint64_t warmed_stamp(bool libraries) {
 /// behind it (prepare_background)
 #ifdef __PROSPERO__
 extern "C" uint64_t hos_ps5_direct_room(void);
+extern "C" void ps5_heap_trim(void) __attribute__((weak));
 #endif
 bool prepare_is_update() {
     // (opt-in, RX_VK_PREPARE_BACKGROUND=1: when the translator changed, the program cache is gone too, and the first area then
@@ -9850,7 +9851,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
             if (prepare_stopped()) return;
 #ifdef __PROSPERO__
             if (background) {
-                while (!prepare_stopped() && hos_ps5_direct_room() < (1536ull << 20)) Sleep(500);
+                while (!prepare_stopped() && hos_ps5_direct_room() < (2560ull << 20)) Sleep(500);
                 if (prepare_stopped()) return;
             }
 #endif
@@ -9893,6 +9894,9 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
 #endif
             }
             done++, work++;
+#ifdef __PROSPERO__
+            if (background && (done.load() & 31) == 0 && ps5_heap_trim) ps5_heap_trim();
+#endif
         }
     };
     std::vector<std::thread> threads;
@@ -11646,6 +11650,8 @@ void pipeline_cache_play() {
         }
 #if defined(__GLIBC__)
         if (dropped_modules) malloc_trim(0);
+#elif defined(__PROSPERO__)
+        if (dropped_modules && ps5_heap_trim) ps5_heap_trim();
 #endif
     }
 #endif

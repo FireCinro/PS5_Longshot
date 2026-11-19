@@ -383,6 +383,10 @@ void hos_fatal(Ctx *c, const char *fmt, ...) {
     void hos_backtrace(void), hos_hostcall_stats(void);
     hos_backtrace();
     hos_hostcall_stats();
+#ifdef __PROSPERO__
+    void hos_ps5_write_crash_log(const char *reason, uintptr_t rip, uintptr_t addr, int sig, int is_write, uint64_t mc_err);
+    hos_ps5_write_crash_log(clean, 0, c ? (uintptr_t)c->x[30] : 0, 0, 0, 0);
+#endif
     ExitProcess(3);
 }
 

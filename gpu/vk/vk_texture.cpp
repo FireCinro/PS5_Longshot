@@ -84,6 +84,9 @@
 
 #ifdef __PROSPERO__
 extern "C" uint64_t hos_ps5_direct_room(void);   // (host/ps5/win32_ps5.c: the title's free direct memory in all)
+extern "C" uint64_t hos_ps5_direct_total(void);
+extern "C" uint64_t hos_ps5_release_unused_direct_trylock(uint64_t keep_bytes);
+extern "C" void ps5_heap_trim(void) __attribute__((weak));
 #endif
 
 namespace mkwvk {
@@ -401,11 +404,16 @@ static bool linux_pressed = false;
 static bool linux_entered_pressure = false;
 static std::atomic<uint64_t> linux_shortfall_bytes{0}, linux_shortfall_seq{0};
 uint64_t pool_cap() {
-    // (longshot) RX_VK_TARGET_POOL_MB=<MB>, else a twelfth of what the driver allows, 256 to 768 MB (target_pool.h)
+    // (longshot) RX_VK_TARGET_POOL_MB=<MB>, else a twelfth of what the driver allows, 256 to 768 MB (target_pool.h;
+    // 128 MB on Base PS5 / 192 MB on PS5 Pro to curb transient target hoarding)
     static const uint64_t mb = [] {
         if (const char* e = getenv("RX_VK_TARGET_POOL_MB")) return (uint64_t)std::max(0, atoi(e));
+#ifdef __PROSPERO__
+        const uint64_t v = hos_ps5_direct_total() <= (12500ull << 20) ? 128 : 192;
+#else
         uint64_t used = 0, allowed = 0;
         const uint64_t v = target_pool::default_mb(vram_usage(&used, &allowed) ? allowed : 0);
+#endif
         logf("vk: render target pool: up to %llu MB (RX_VK_TARGET_POOL_MB)", (unsigned long long)v);
         return v;
     }();
@@ -455,7 +463,7 @@ size_t pool_trim() {
     std::lock_guard lk(pool_mu);
     const uint64_t full_cap = pool_cap();
     const uint64_t cap = (pool_pressure >= 2) ? 0 : (pool_pressure == 1) ? (full_cap / 2) : full_cap;
-    const size_t most = (pool_pressure > 0) ? 64 : 16;
+    const size_t most = (pool_pressure >= 2) ? SIZE_MAX : (pool_pressure > 0) ? 64 : 16;
     size_t n = 0;
     while (!pool_by_age.empty() && n < most) {
         Pooled& oldest = pool_by_age.front();
@@ -5051,6 +5059,35 @@ void texture_frame(uint64_t completed) {
     frame_no++;
     drawn_writeback_frame();
     reuse_retire_frame();
+    bool ps5_short = false, ps5_critical = false;
+#ifdef __PROSPERO__
+    {
+        const uint64_t ps5_room = hos_ps5_direct_room();
+        const uint64_t ps5_res = ps5_tex_reserve();
+        ps5_short = ps5_room < ps5_res;
+        ps5_critical = ps5_room < ps5_res / 2;
+        if (ps5_short) {
+            if (!linux_pressed) linux_entered_pressure = true;
+            linux_pressed = true;
+            pool_pressure = 2;
+            pool_trim();
+            compact.pressed = true;
+            if (compact.next_check > frame_no) compact.next_check = frame_no;
+            linux_shortfall_bytes.store(ps5_res - ps5_room, std::memory_order_relaxed);
+            linux_shortfall_seq.fetch_add(1, std::memory_order_release);
+            static std::chrono::steady_clock::time_point ps5_trim_at{};
+            const auto trim_now = std::chrono::steady_clock::now();
+            if (ps5_trim_at == std::chrono::steady_clock::time_point{} || trim_now - ps5_trim_at >= std::chrono::seconds(2)) {
+                ps5_trim_at = trim_now;
+                (void)hos_ps5_release_unused_direct_trylock(0);
+                if (ps5_heap_trim) ps5_heap_trim();
+            }
+        } else if (linux_pressed) {
+            linux_pressed = false;
+            linux_shortfall_bytes.store(0, std::memory_order_release);
+        }
+    }
+#endif
     {   // (staging arenas the GPU is done with, beyond 256 MB of them, and any over 64 MB: freed. A scene change stages
         // hundreds of MB to over a GB (the course maps, the terrain's ASTC arrays), and that host memory was kept)
         // (longshot: 128 where the driver allows 6.5 GB or less, device_policy.h staging_keep. On one with resizable BAR the arenas are VRAM: VMA puts a host-visible buffer the GPU
@@ -5176,7 +5213,7 @@ void texture_frame(uint64_t completed) {
     // may have (other programs use the GPU too). The least recently used go first, down to 7/8 of it; nothing the
     // last 8 presents used, nothing recorded work may still read.
     static uint64_t own = 0;
-    if (!dead_targets::pass_due(frame_no)) {
+    if (!ps5_critical && !dead_targets::pass_due(frame_no)) {
         // (longshot) the dead transient targets on the presents between the passes (dead_targets.h)
         static const bool evicting = !env_on("RX_VK_NO_EVICT");
         if (dead_targets::sweep_due(frame_no, dead_every_presents(), evicting)) dead_targets_sweep(completed);
@@ -5451,7 +5488,7 @@ void texture_frame(uint64_t completed) {
     // for a second goes, not only what is over the renderer's own share. Leaving Hyrule Castle Town the town's 1.25 GB of
     // textures waited their turn under a loading screen while the game's next page found no memory
     static std::atomic<uint64_t> ps5_shed_frames{0};
-    if (hos_ps5_direct_room() < ps5_tex_reserve()) {
+    if (ps5_short) {
         budget = 0;
         const uint64_t n = ++ps5_shed_frames;
         if (n == 1 || n % 600 == 0)
@@ -5466,6 +5503,9 @@ void texture_frame(uint64_t completed) {
     // this takes more than that share of the allowance free in their pool. Otherwise the pass is the hold's, and what the
     // limit and the 90% rule ask for goes by rule_to)
     if (budget < evict_to) evict_to = hold_to = 0;
+#ifdef __PROSPERO__
+    if (ps5_short) budget = rule_budget = evict_to = hold_to = 0;
+#endif
     if (frame_no % 600 == 0) {
         vma_log_heaps();
         vma_log_image_blocks();
@@ -5679,7 +5719,11 @@ void texture_frame(uint64_t completed) {
         logf("vk: finalized textures the GPU drew once, kept for being made again: %zu (%llu KB):%s", finalized_kept_n,
              (unsigned long long)(finalized_kept >> 10), n ? line : "");
     }
+#ifdef __PROSPERO__
+    const uint64_t need_unused = ps5_critical ? 4 : ps5_short ? 12 : (sweep ? std::max<uint64_t>(120, min_unused) : min_unused);
+#else
     const uint64_t need_unused = sweep ? std::max<uint64_t>(120, min_unused) : min_unused;
+#endif
     const uint64_t need_dead = std::min(need_unused, dead_min_unused);
     static uint64_t n_dead, b_dead, dead_logged_at;
     // (longshot) the textures to go are chosen first and destroyed after; the write-backs among them go to the GPU in a few
@@ -5715,7 +5759,11 @@ void texture_frame(uint64_t completed) {
         // back to that course. Without it a course change kept 1.4 GB arrays and VRAM ran over)
         // (600 presents near what the driver allows, at the budget's 97%: past it the driver pages VRAM to system memory.
         // AMD's driver reports the use at most at what it allows, so "over it" never held there: keep_rendered.h)
-        const uint64_t keep_rendered = keep_rendered::presents(known, used, allowed);
+        uint64_t keep_rendered = keep_rendered::presents(known, used, allowed);
+#ifdef __PROSPERO__
+        if (ps5_critical) keep_rendered = std::min<uint64_t>(keep_rendered, 60);
+        else if (ps5_short) keep_rendered = std::min<uint64_t>(keep_rendered, 180);
+#endif
         const bool overwritten = shifted || drawn_over(tex);   // (above)
         // (longshot, RX_VK_COMPACT: the hold's pass, above. A live texture stays once the excess over its line is covered: the
         // reserve's line for one long unused, the hold's own for one unused ten seconds, and what the other rules ask (the 90%
@@ -5729,7 +5777,7 @@ void texture_frame(uint64_t completed) {
             const uint64_t to = vram_compact::hold_target(frame_no - last, need_unused, rule_to, hold_to, evict_to);
             if (to == UINT64_MAX || vram_compact::hold_met(total_bytes, hold_live, hold_dead, to)) continue;
         }
-        if (!obsolete && finalized_kept && keep_finalized(tex)) {   // (above. Oldest first: beyond the cap the least recently used go)
+        if (!ps5_critical && !obsolete && finalized_kept && keep_finalized(tex)) {   // (above. Oldest first: beyond the cap the least recently used go)
             if (finalized_kept <= keep_finalized_max) continue;
             finalized_kept -= tex->bytes;
             static int logged;

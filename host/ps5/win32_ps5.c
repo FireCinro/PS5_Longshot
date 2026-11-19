@@ -13,6 +13,7 @@
 #include <windows.h>
 
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <pthread_np.h>
 #include <signal.h>
@@ -23,6 +24,7 @@
 #include <strings.h>
 #include <sys/types.h>
 #include <sys/umtx.h>
+#include <unistd.h>
 
 #include <ps5platform/kernel.h>
 #include <ps5platform/shm.h>
@@ -40,7 +42,7 @@ int32_t sceKernelMprotect(const void *address, size_t bytes, int protection);
 
 #define UNIT 0x10000ULL                       /* commit granularity: Windows' allocation granularity */
 #define PIECE (16ULL << 30)                   /* reservation step */
-#define BLOCK (64ULL << 20)                   /* smallest direct-memory block taken for guest pages */
+#define BLOCK (16ULL << 20)                   /* smallest direct-memory block taken for guest pages */
 #define GPU_RW 0x30                           /* the kernel's GPU read and write protection bits (RADV's own mappings) */
 #define DIRECT_TYPE 12                        /* write-back, CPU and GPU coherent: RADV's and ProsperoEden's guest type */
 #define GUEST_UNITS ((HOS_PS5_GUEST_HI - HOS_PS5_GUEST_LO) / UNIT)
@@ -48,6 +50,8 @@ int32_t sceKernelMprotect(const void *address, size_t bytes, int protection);
 
 static DWORD set_error(DWORD e) { SetLastError(e); return e; }
 int sceKernelDebugOutText(int channel, const char *text);
+static char klog_ring[16384];
+static uint64_t klog_ring_written;
 /* A line straight to klog: standard error goes through the platform layer's pipe and thread, which a crash outruns */
 void hos_ps5_klog_now(const char *fmt, ...) {
     char line[320];
@@ -58,6 +62,8 @@ void hos_ps5_klog_now(const char *fmt, ...) {
     if (n < 0) return;
     if (n > (int)sizeof line - 2) n = (int)sizeof line - 2;
     line[n] = '\n', line[n + 1] = 0;
+    const uint64_t pos = __atomic_fetch_add(&klog_ring_written, (uint64_t)(n + 1), __ATOMIC_RELAXED);
+    for (int i = 0; i <= n; i++) klog_ring[(pos + (uint64_t)i) % sizeof klog_ring] = line[i];
     sceKernelDebugOutText(0, line);
 }
 
@@ -162,6 +168,150 @@ static int commit_units(uintptr_t lo, uintptr_t hi) {
     return 1;
 }
 
+static uint64_t direct_room_now(uint64_t *pieces);
+uint64_t hos_ps5_direct_room(void);
+uint64_t hos_ps5_direct_free(void);
+uintptr_t hos_ps5_exe_base(void);
+
+static void sift_down_i64(int64_t *a, size_t start, size_t end) {
+    size_t root = start;
+    while (root * 2 + 1 < end) {
+        size_t child = root * 2 + 1;
+        size_t swap_idx = root;
+        if (a[swap_idx] < a[child]) swap_idx = child;
+        if (child + 1 < end && a[swap_idx] < a[child + 1]) swap_idx = child + 1;
+        if (swap_idx == root) return;
+        const int64_t tmp = a[root];
+        a[root] = a[swap_idx];
+        a[swap_idx] = tmp;
+        root = swap_idx;
+    }
+}
+
+static void heapsort_i64(int64_t *a, size_t n) {
+    if (n < 2) return;
+    for (size_t start = n / 2; start > 0; start--) sift_down_i64(a, start - 1, n);
+    for (size_t end = n; end > 1; end--) {
+        const int64_t tmp = a[0];
+        a[0] = a[end - 1];
+        a[end - 1] = tmp;
+        sift_down_i64(a, 0, end - 1);
+    }
+}
+
+/* Releases decommitted guest direct memory (and unused block tail when keep_bytes == 0) back to the kernel; window_lock held. */
+static uint64_t release_unused_direct_locked(uint64_t keep_bytes) {
+    uint64_t released = 0;
+    if (keep_bytes == 0 && block_end > block_next) {
+        const size_t tail = (size_t)(block_end - block_next);
+        if (sceKernelReleaseDirectMemory(block_next, tail) == 0) {
+            released += tail;
+            block_next = block_end = 0;
+        }
+    }
+    const size_t keep_units = (size_t)(keep_bytes / UNIT);
+    if (free_count > keep_units) {
+        heapsort_i64(free_units, free_count);
+        size_t new_count = 0;
+        for (size_t i = 0; i < free_count;) {
+            size_t j = i + 1;
+            while (j < free_count && free_units[j] == free_units[j - 1] + (int64_t)UNIT) j++;
+            const size_t run_len = j - i;
+            const size_t avail_total = new_count + (free_count - i);
+            size_t rel_n = 0;
+            if (avail_total > keep_units) {
+                const size_t excess = avail_total - keep_units;
+                rel_n = run_len < excess ? run_len : excess;
+            }
+            if (rel_n > 0 && sceKernelReleaseDirectMemory(free_units[i], rel_n * UNIT) == 0) {
+                released += (uint64_t)rel_n * UNIT;
+                for (size_t k = i + rel_n; k < j; k++) free_units[new_count++] = free_units[k];
+            } else {
+                for (size_t k = i; k < j; k++) free_units[new_count++] = free_units[k];
+            }
+            i = j;
+        }
+        free_count = new_count;
+    }
+    if (released >= (16ULL << 20))
+        hos_ps5_klog_now("[ps5] guest direct memory returned to kernel: %llu MiB (kept %llu MiB)",
+                         (unsigned long long)(released >> 20), (unsigned long long)((uint64_t)free_count * UNIT >> 20));
+    return released;
+}
+
+uint64_t hos_ps5_direct_total(void) { return (uint64_t)sceKernelGetDirectMemorySize(); }
+
+uint64_t hos_ps5_release_unused_direct(uint64_t keep_bytes) {
+    pthread_mutex_lock(&window_lock);
+    const uint64_t r = window_reserved ? release_unused_direct_locked(keep_bytes) : 0;
+    pthread_mutex_unlock(&window_lock);
+    return r;
+}
+
+uint64_t hos_ps5_release_unused_direct_trylock(uint64_t keep_bytes) {
+    if (pthread_mutex_trylock(&window_lock) != 0) return 0;
+    const uint64_t r = window_reserved ? release_unused_direct_locked(keep_bytes) : 0;
+    pthread_mutex_unlock(&window_lock);
+    return r;
+}
+
+/* Async-signal-safe crash / OOM log written to /app0/logs/ps5_crash.log (raw syscalls + stack buffer only). */
+static volatile int crash_log_written;
+void hos_ps5_write_crash_log(const char *reason, uintptr_t rip, uintptr_t addr, int sig, int is_write, uint64_t mc_err) {
+    if (__atomic_exchange_n(&crash_log_written, 1, __ATOMIC_ACQ_REL)) return;
+    uint64_t pieces = 0;
+    const uint64_t total = (uint64_t)sceKernelGetDirectMemorySize();
+    const uint64_t room = direct_room_now(&pieces);
+    const uint64_t largest = hos_ps5_direct_free();
+    const uint64_t cbytes = __atomic_load_n(&committed_bytes, __ATOMIC_RELAXED);
+    const size_t fcount = __atomic_load_n(&free_count, __ATOMIC_RELAXED);
+    const int64_t bnext = __atomic_load_n(&block_next, __ATOMIC_RELAXED);
+    const int64_t bend = __atomic_load_n(&block_end, __ATOMIC_RELAXED);
+    extern uint64_t radv_ps5_allocated_bytes __attribute__((weak));
+    const uint64_t radv_bytes = &radv_ps5_allocated_bytes ? __atomic_load_n(&radv_ps5_allocated_bytes, __ATOMIC_RELAXED) : 0;
+    struct ps5_heap_stats hstats = {0};
+    ps5_heap_stats(&hstats);
+    size_t flex_avail = 0;
+    (void)sceKernelAvailableFlexibleMemorySize(&flex_avail);
+    const uintptr_t base = hos_ps5_exe_base();
+    const unsigned long off = rip && rip >= base ? (unsigned long)(rip - base) : 0ul;
+    char buf[2048];
+    const int n = snprintf(buf, sizeof buf,
+                           "reason: %s\n"
+                           "signal: %d (%s), rip: eboot+%#lx (%#lx), address: %#lx, mc_err: %#llx\n"
+                           "direct_total_mib: %llu\n"
+                           "direct_free_room_mib: %llu (pieces: %llu, largest_free_mib: %llu)\n"
+                           "guest_committed_mib: %llu, guest_free_units_mib: %llu, guest_block_unused_mib: %llu\n"
+                           "radv_allocated_mib: %llu\n"
+                           "heap_mapped_mib: %llu, heap_in_use_mib: %llu, heap_peak_mib: %llu, heap_segments: %u\n"
+                           "flexible_avail_mib: %llu\n"
+                           "--- klog_ring ---\n",
+                           reason ? reason : "(null)",
+                           sig, is_write ? "write" : "read", off, (unsigned long)rip, (unsigned long)addr, (unsigned long long)mc_err,
+                           (unsigned long long)(total >> 20),
+                           (unsigned long long)(room >> 20), (unsigned long long)pieces, (unsigned long long)(largest >> 20),
+                           (unsigned long long)(cbytes >> 20), (unsigned long long)((uint64_t)fcount * UNIT >> 20),
+                           (unsigned long long)(bend > bnext ? (uint64_t)(bend - bnext) >> 20 : 0ULL),
+                           (unsigned long long)(radv_bytes >> 20),
+                           (unsigned long long)(hstats.mapped_bytes >> 20), (unsigned long long)(hstats.in_use_bytes >> 20),
+                           (unsigned long long)(hstats.peak_bytes >> 20), hstats.segments,
+                           (unsigned long long)(flex_avail >> 20));
+    const int fd = open("/app0/logs/ps5_crash.log", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0) return;
+    if (n > 0) (void)write(fd, buf, (size_t)n < sizeof buf ? (size_t)n : sizeof buf - 1);
+    const uint64_t kw = __atomic_load_n(&klog_ring_written, __ATOMIC_RELAXED);
+    if (kw > 0) {
+        if (kw <= sizeof klog_ring) {
+            (void)write(fd, klog_ring, (size_t)kw);
+        } else {
+            const size_t start = (size_t)(kw % sizeof klog_ring);
+            if (start < sizeof klog_ring) (void)write(fd, klog_ring + start, sizeof klog_ring - start);
+            if (start > 0) (void)write(fd, klog_ring, start);
+        }
+    }
+    close(fd);
+}
+
 /* commit_units, waiting for memory when there is none: the game gives an area's pages back while it loads the next (leaving
    Hyrule Castle Town a worker's page found none with 85 MiB free, and the game was gone), the renderer's emptied blocks and
    the heap's free segments go back too. Tried again for up to 10 s before the caller is told no; window_lock held on
@@ -172,10 +322,16 @@ static int commit_units_wait(uintptr_t lo, uintptr_t hi) {
             if (tries) hos_ps5_klog_now("[ps5] guest commit: memory found after %d ms", tries * 20);
             return 1;
         }
+        if (!tries) (void)release_unused_direct_locked(0);
         if (!tries || tries == 500)
             hos_ps5_klog_now("[ps5] guest commit: no direct memory left (%llu MiB committed)%s",
                              (unsigned long long)(committed_bytes >> 20), tries ? "" : ": waiting for some");
-        if (tries == 500) return 0;
+        if (tries == 500) {
+            pthread_mutex_unlock(&window_lock);
+            hos_ps5_write_crash_log("guest commit_units_wait OOM (10s exhausted)", 0, lo, 0, 1, hi - lo);
+            pthread_mutex_lock(&window_lock);
+            return 0;
+        }
         pthread_mutex_unlock(&window_lock);
 #ifdef PS5_HEAP_TRIM
         if (!tries) ps5_heap_trim();
@@ -232,6 +388,9 @@ int hos_ps5_decommit(void *addr, size_t size) {
         units += n;
         at += n * UNIT;
     }
+    if ((uint64_t)free_count * UNIT > (64ULL << 20) ||
+        ((uint64_t)free_count * UNIT > (16ULL << 20) && hos_ps5_direct_room() < (2048ULL << 20)))
+        (void)release_unused_direct_locked(16ULL << 20);
     pthread_mutex_unlock(&window_lock);
     if (now_ms() - t0 >= 20) hos_ps5_klog_now("[ps5] guest decommit: %llu MiB given back in %.0f ms", (unsigned long long)(units * UNIT >> 20), now_ms() - t0);
     return 1;

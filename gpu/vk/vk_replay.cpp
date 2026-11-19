@@ -4577,6 +4577,9 @@ uint64_t vk_retirement_value() {
     return timeline && signaled != UINT64_MAX ? signaled + 1 : 0;
 }
 
+#ifdef __PROSPERO__
+extern "C" void hos_ps5_write_crash_log(const char*, uintptr_t, uintptr_t, int, int, uint64_t);
+#endif
 /// A submission or a wait came back VK_ERROR_DEVICE_LOST. Nothing sent from here on runs, and the replay kept going: no
 /// submission completed again, so no capture or staging arena was let go, and system memory filled until the window was
 /// closed (issue 1275: captures kept 25 -> 6527, staging 256 -> 1408 MB). Now the report once (a thread that sees the loss
@@ -4597,6 +4600,9 @@ uint64_t vk_retirement_value() {
                         "to it runs any more (on Linux, dmesg or journalctl -k around this time names the reset)",
                   dev.present_queue_supported ? ". The presents were on a queue of their own: RX_VK_PRESENT_QUEUE=0 in "
                                                 "longshot_env.txt turns that off; please report your GPU and driver" : "");
+#ifdef __PROSPERO__
+    hos_ps5_write_crash_log(lost, 0, 0, 0, 0, 0);
+#endif
     replay_fatal(lost);
 }
 
