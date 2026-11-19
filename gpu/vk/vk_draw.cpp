@@ -9213,8 +9213,9 @@ bool temporal_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p)
 static Texture* upscale_picture(const NvnState& s, const Program& p, uint32_t* level) {
     if (p.stages.empty() || !fsr3fi::frames_wanted()) return nullptr;
     const Stage& st = p.stages[0];
-    if (!gameplay_network(p.key) && !(st.info.uses_cooperative_matrix && st.info.texture_descriptors.size() == 1 &&
-                                      st.info.image_descriptors.size() == 1))
+    const bool known = gameplay_network(p.key);
+    if (!known && !(st.info.uses_cooperative_matrix && st.info.texture_descriptors.size() == 1 &&
+                    st.info.image_descriptors.size() == 1))
         return nullptr;
     if (st.info.texture_descriptors.empty() || st.info.image_descriptors.empty()) return nullptr;
     Texture* in = nullptr;
@@ -9224,7 +9225,10 @@ static Texture* upscale_picture(const NvnState& s, const Program& p, uint32_t* l
     Texture* out = nullptr;
     const uint32_t out_handle = handle_of(s, st, od, 0);
     if (out_handle) texture_view_of(out_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, image_format(od.format), &out, level);
-    if (!in || !out || !temporal_colour_pair(in->format, out->format) || (out->width >> *level) <= in->width) return nullptr;
+    if (!in || !out || !temporal_colour_pair(in->format, out->format)) return nullptr;
+    // At 100% render resolution the known gameplay pass writes the picture at the scene's own size.
+    const uint32_t width = out->width >> *level;
+    if (width <= in->width && !(known && width == in->width && (out->height >> *level) == in->height)) return nullptr;
     return out;
 }
 /// (longshot) The same for an upscale network that did not translate on this GPU (upscale_stub found its input, the largest
