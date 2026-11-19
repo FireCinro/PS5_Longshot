@@ -492,11 +492,12 @@ void vma_log_heaps() {
 /// not fit here: its device heap was 8.6 GB "allowed", and its usage counts the game's pools the renderer imports, pages
 /// already counted as the game's: the renderer grew to 3.3 GB of blocks with "8.3 of 8.6 GB" used while the game's next
 /// page found no memory.
-extern "C" uint64_t hos_ps5_direct_free(void);   // (host/ps5/win32_ps5.c: the largest free piece)
 static uint64_t ps5_render_budget(uint64_t own) {
     static const uint64_t cap = (getenv("HOS_PS5_RENDER_MB") ? (uint64_t)atoi(getenv("HOS_PS5_RENDER_MB")) : 2560) << 20;
     static const uint64_t reserve = (getenv("HOS_PS5_RESERVE_MB") ? (uint64_t)atoi(getenv("HOS_PS5_RESERVE_MB")) : 2048) << 20;
-    const uint64_t free_now = hos_ps5_direct_free();
+    // (PS5: use total free direct memory across all 2 MiB chunks, not largest contiguous block: fragmentation made
+    // hos_ps5_direct_free() drop under reserve and evict in-use textures while 1.5-2.7 GiB was still free)
+    const uint64_t free_now = hos_ps5_direct_room();
     const uint64_t room = own + (free_now > reserve ? free_now - reserve : 0);
     return std::min(cap, room);
 }
