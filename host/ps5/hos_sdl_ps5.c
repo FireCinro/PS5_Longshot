@@ -159,6 +159,24 @@ static void audio_fill(int16_t *frames, int count, void *user) {
     const int frame_bytes = audio_channels * (audio_s16 ? 2 : 4);
     if (count > 256) count = 256;
     audio_pull(audio_user, buf, count * frame_bytes);
+    if (audio_channels >= 6) {
+        /* (local fix) 5.1 (FL FR FC LFE BL BR) down to the console's stereo port, centre and back channels kept: the
+           first two channels alone lost the centre, where a movie's dialogue is */
+        for (int i = 0; i < count; i++) {
+            float s[6];
+            for (int c = 0; c < 6; c++)
+                s[c] = audio_s16 ? ((const int16_t *)buf)[i * audio_channels + c] / 32768.0f
+                                 : ((const float *)buf)[i * audio_channels + c];
+            const float l = s[0] + 0.7071f * s[2] + 0.5f * s[3] + 0.7071f * s[4];
+            const float r = s[1] + 0.7071f * s[2] + 0.5f * s[3] + 0.7071f * s[5];
+            const float lr[2] = {l, r};
+            for (int c = 0; c < 2; c++) {
+                const float v = lr[c] * 32767.0f;
+                frames[i * 2 + c] = (int16_t)(v > 32767.0f ? 32767 : v < -32768.0f ? -32768 : v);
+            }
+        }
+        return;
+    }
     for (int i = 0; i < count; i++)
         for (int c = 0; c < 2; c++) {
             const int from = c < audio_channels ? c : 0;

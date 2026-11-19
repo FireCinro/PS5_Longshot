@@ -147,6 +147,16 @@ int64_t nup_romfs_find(const char *path, int *is_dir, uint64_t *size) {
     if (!nup_romfs_path(path)) return -1;
     const char *rel = path + ROOT_LEN;
     while (*rel == '/') rel++;
+    /* (local fix) "a//b" is "a/b", as on a real file system: the game asks for its voices as
+       content://Voice/Resource//Stream/<name>.bwav, and the exact match missed every one (no voices on PS5) */
+    char clean[1024];
+    if (strstr(rel, "//")) {
+        size_t o = 0;
+        for (const char *p = rel; *p && o + 1 < sizeof clean; p++)
+            if (!(*p == '/' && o && clean[o - 1] == '/')) clean[o++] = *p;
+        clean[o] = 0;
+        rel = clean;
+    }
     size_t n = strlen(rel);
     while (n && rel[n - 1] == '/') n--;
     uint32_t node;
