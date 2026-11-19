@@ -9514,10 +9514,18 @@ uint64_t warmed_stamp(bool libraries) {
 /// update then held the game's start for the whole seed again (116k variants, minutes on most PCs: "shaders need to be prepared every
 /// update"). With RX_VK_PREPARE_BACKGROUND=1 only what the notes name is built before the game (precompile_run), the rest in play
 /// behind it (prepare_background)
+#ifdef __PROSPERO__
+extern "C" uint64_t hos_ps5_direct_room(void);
+#endif
 bool prepare_is_update() {
     // (opt-in, RX_VK_PREPARE_BACKGROUND=1: when the translator changed, the program cache is gone too, and the first area then
     // translated thousands of programs in play: 1 fps and black frames for minutes, which looked broken. Before the game is the default)
     if (env_on("RX_VK_PREPARE_AGAIN") || !env_on("RX_VK_PREPARE_BACKGROUND")) return false;
+#ifdef __PROSPERO__
+    // (PS5: allow RX_VK_PREPARE_BACKGROUND=1 on a first prepare too so players can jump straight into play while shaders
+    // finish translating gently at idle priority behind the game)
+    return true;
+#endif
     FILE* f = fopen(prepared_path().c_str(), "rb");
     if (!f) return false;
     uint64_t have = 0;
@@ -9840,6 +9848,12 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
         SetThreadPriority(GetCurrentThread(), background ? THREAD_PRIORITY_IDLE : THREAD_PRIORITY_BELOW_NORMAL);
         for (;;) {
             if (prepare_stopped()) return;
+#ifdef __PROSPERO__
+            if (background) {
+                while (!prepare_stopped() && hos_ps5_direct_room() < (1536ull << 20)) Sleep(500);
+                if (prepare_stopped()) return;
+            }
+#endif
             const size_t i = next++;
             if (i >= total) return;
             const size_t k = order[i / 3];
@@ -9850,6 +9864,9 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
                     made += v.variants != 0, variants += v.variants, asking += v.variants > 1, capped += v.capped && v.variants;
                     if (!apart && warm_seen)   // (its compiles, all counted)
                         work += work_of.warm_each - std::min(warm_credited, work_of.warm_each);
+#ifdef __PROSPERO__
+                    if (background && v.variants) Sleep(15);
+#endif
                 }
                 done++, work++;
                 continue;
@@ -9871,6 +9888,9 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
                 if (!p->failed) made++;
                 for (Stage& st : p->stages)
                     if (st.module) vkDestroyShaderModule(dev.device, st.module, nullptr);
+#ifdef __PROSPERO__
+                if (background) Sleep(15);
+#endif
             }
             done++, work++;
         }
@@ -9879,7 +9899,11 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
     const unsigned cpus = usable_cpus();
     // (in play: a quarter of the CPUs, two to four, the game's own threads before them)
     // (device_policy.h program_workers_in_play; and never more than the process may use now)
+#ifdef __PROSPERO__
+    const unsigned workers = background ? 1u : prepare_cpus();
+#else
     const unsigned workers = background ? std::min(dev.policy.program_workers_in_play, cpus) : prepare_cpus();
+#endif
     if (!background)
         logf("vk: preparation: %u workers for the shader programs (%u CPUs usable; %s)", workers, cpus,
              segment_heap() ? "the segment heap: as many as the free memory allows" : "half the CPUs");
