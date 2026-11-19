@@ -37,6 +37,14 @@ int hos_oot_state(int *event, int *loading, int *child) {
     if (child) *child = 0;
     return 0;
 }
+int hos_oot_stats(int *life, int *max_life, int *rupees, int *tokens, int *pieces) {
+    if (life) *life = -1;
+    if (max_life) *max_life = -1;
+    if (rupees) *rupees = -1;
+    if (tokens) *tokens = -1;
+    if (pieces) *pieces = -1;
+    return 0;
+}
 int hos_oot_current_map(char *out, size_t cap) { if (out && cap) *out = 0; return 0; }
 int hos_oot_destination(int index, const char **child, const char **adult) { (void)index, (void)child, (void)adult; return 0; }
 int hos_oot_teleport_ask(int index) { (void)index; return 0; }

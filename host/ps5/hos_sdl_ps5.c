@@ -262,6 +262,13 @@ int hos_sdl_pad_sensor_enable(void *pad, int type, int on) { (void)pad, (void)ty
 int hos_sdl_pad_sensor(void *pad, int type, float *data, int n) { (void)pad, (void)type, (void)data, (void)n; return 0; }
 
 /* ---- (longshot) what hos_sdl.h has gained since the port was written: nothing of it is on the console ---- */
+int hos_sdl_monitor_list(void *window, struct MkwVkMonitor *out, uint32_t *tokens, int cap) {
+    (void)window, (void)out, (void)tokens, (void)cap;
+    return 0;
+}
+uint32_t hos_sdl_window_display(void *window) { (void)window; return UINT32_MAX; }
+int hos_sdl_fullscreen_target(void *window, int on, uint32_t token) { (void)window, (void)on, (void)token; return 0; }
+int hos_sdl_is_fullscreen(void *window) { (void)window; return 1; }
 int hos_sdl_hint_override(const char *name, const char *value) { (void)name, (void)value; return 0; }
 void hos_sdl_mouse_position(float *x, float *y) { if (x) *x = 0; if (y) *y = 0; }
 void hos_sdl_text_input(void *window, int on) { (void)window, (void)on; }
