@@ -36,7 +36,7 @@ EXE = ".exe" if os.name == "nt" else ""
 # textures (the Pro's 1024 take 135 MB more in the forest). The switches go in longshot_env.txt in the title folder, which
 # the title reads at its start (host/hos_main.c); a line the player adds there afterwards is theirs.
 MODELS = {
-    "base": {"name": "PS5 / PS5 Slim", "attribute3": 0x140040, "env": {"RX_VK_TEX_MAX_DIM": "512", "RX_VK_DESC_POOL_DIV": "16", "RX_VK_COMPACT_PCT": "70"}},
+    "base": {"name": "PS5 / PS5 Slim", "attribute3": 0x140040, "env": {"RX_VK_TEX_MAX_DIM": "512", "RX_VK_DESC_POOL_DIV": "16", "RX_VK_COMPACT_PCT": "70", "RX_VK_ASTC_BC7": "1"}},
     "pro": {"name": "PS5 Pro", "attribute3": 0x8540040, "env": {}},
 }
 STEPS = ["Reading the game's program", "Translating it to C", "Compiling for the console", "Linking", "Making the title folder"]
