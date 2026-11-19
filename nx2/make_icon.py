@@ -1,9 +1,11 @@
-"""The app icon from a picture: an .ico for the builder and a .res the game's exe links in (nx2/build.py).
+"""The app icon from a picture: an .ico (builder/setup/longshot.ico, the builder's, the launcher's and the game exe's: nx2/build.py
+links it in as work/longshot_brand.res, images_of_ico) and a .res of it.
 
     python nx2/make_icon.py <picture.png> [out folder, default work]
 
-The picture is the user's and stays out of the repository, so these go to work/. Needs Pillow. The builder makes the game's
-own (its icon, and the name Windows shows for the exe) with the same functions: nx2/game_title.py.
+A picture's .ico and .res go to work/ (the picture stays out of the repository); the game's exe links Longshot's own icon, not
+work/longshot.res. Needs Pillow; reading an .ico (images_of_ico) does not. The builder makes the name Windows shows for the exe
+with the same functions: nx2/game_title.py.
 """
 import io
 import os
@@ -33,6 +35,22 @@ def png_of(im):
 def images_of(im):
     """[(size, PNG bytes)] at each of SIZES"""
     return [(s, png_of(square(im, s))) for s in SIZES]
+
+
+def images_of_ico(data):
+    """[(size, PNG bytes)] of an .ico whose images are PNGs (as ico_of writes them, and builder/setup/longshot.ico has them):
+    read as they are, with no Pillow (the builders that make releases need none)"""
+    reserved, kind, n = struct.unpack("<HHH", data[:6])
+    if reserved or kind != 1 or not n:
+        raise ValueError("not an icon file")
+    out = []
+    for i in range(n):
+        w, _h, _colours, _, _planes, _bits, size, at = struct.unpack("<BBBBHHII", data[6 + 16 * i:22 + 16 * i])
+        png = data[at:at + size]
+        if png[:8] != b"\x89PNG\r\n\x1a\n":
+            raise ValueError("an icon image that is not a PNG (%d pixels)" % (w or 256))
+        out.append((w or 256, png))
+    return out
 
 
 def res_entry(kind, name, data, flags=0x1010):

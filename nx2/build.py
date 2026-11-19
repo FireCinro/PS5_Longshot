@@ -426,14 +426,40 @@ GPU = os.path.join(kit.HERE, "..", "gpu")
 FFMPEG = None   # (found in the CPM caches below, once cpm_dirs is defined)
 
 
-def exe_resources():
-    """(Windows) the .res with the exe's icon (and the name Windows shows for it) to link: the game's own, which the builder made
-    from its .nup (work/longshot_game.res, nx2/game_title.py), else a developer's picture (work/longshot.res, nx2/make_icon.py),
-    else none. Only one: both are icon 1"""
-    for name in ("longshot_game.res", "longshot.res"):
-        if os.path.exists(os.path.join(kit.WORK, name)):
-            return [os.path.join(kit.WORK, name)]
-    return []
+BRAND_ICON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "builder", "setup", "longshot.ico")
+BRAND_RES = "longshot_brand.res"
+
+
+def exe_resources(work=None, brand=BRAND_ICON):
+    """(Windows) the .res files to link into the exe: Longshot's icon, always (builder/setup/longshot.ico, the builder's and the
+    launcher's, made into work/longshot_brand.res: icon 1, which the window loads, host/display.c), so every build has it in
+    its window and taskbar, a release's too; and the name Windows shows for the exe when the builder read the game's from its
+    .nup (work/longshot_game.res, nx2/game_title.py: version strings only)"""
+    work = work or kit.WORK
+    out = []
+    try:
+        with open(brand, "rb") as f:
+            data = f.read()
+    except OSError:
+        data = None
+    if data:
+        import make_icon
+        res = os.path.join(work, BRAND_RES)
+        made = make_icon.res_of(make_icon.images_of_ico(data))
+        try:
+            with open(res, "rb") as f:
+                same = f.read() == made
+        except OSError:
+            same = False
+        if not same:
+            os.makedirs(work, exist_ok=True)
+            with open(res, "wb") as f:
+                f.write(made)
+        out.append(res)
+    named = os.path.join(work, "longshot_game.res")
+    if os.path.exists(named):
+        out.append(named)
+    return out
 
 
 def tree_headers(*roots, skip=()):
