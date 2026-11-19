@@ -8249,8 +8249,13 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     texture_watch_prog(p.key);
     if (!same_desc) gfx_sampled() = draw_sampled();
     // (longshot) NVIDIA DLAA before the game's bloom and tone map: the frame's draws into the scene and those that read it, and
-    // at the bloom's first draw DLAA on the scene, before this draw reads it (vk_temporal.cpp, pre_bloom.h)
-    temporal_pre_bloom(cmd, p.key, gfx_sampled(), at.color, at.n);
+    // at the bloom's first draw DLAA on the scene, before this draw reads it (vk_temporal.cpp, pre_bloom.h). Its passes and
+    // its actor motion's draws bound a pipeline, a viewport, vertex streams and descriptors of their own: this draw sets
+    // all of its again, as after the network's stand-in (temporal_stand_in). Kept, a draw of the scene's size (the tone
+    // map, where DLAA ran before it) took the actor motion's upright viewport for the game's upside-down one (dynamic_state)
+    // and drew the 3D upside down (#1672)
+    const bool pre_recorded = temporal_pre_bloom(cmd, p.key, gfx_sampled(), at.color, at.n);
+    if (pre_recorded) cb.reset();
     static const bool barrier_every = env_on("RX_VK_BARRIER_EVERY_DRAW");   // (an experiment: a pass each)
     if (barrier_every) end_pass(cmd);
     reactive_scene_draw(cmd, p, s, at);
@@ -8359,7 +8364,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
             cb.vertex_set.on = false;
         }
     }
-    if (!same_desc) {
+    if (!same_desc || pre_recorded) {   // (longshot: after DLAA's commands, its pushes are gone: temporal_pre_bloom)
         FINE_SCOPE(FT_BINDDESC);
         if (!bind_descriptors(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p)) SKIP_HERE();
         cb.desc.valid = true, cb.desc.prog = &p, cb.desc.bind = s.bind_gen, cb.desc.reg = reg_gen;
