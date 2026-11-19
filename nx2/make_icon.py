@@ -103,6 +103,23 @@ def version_entry(strings):
     return res_entry(16, 1, info, 0x0030)
 
 
+def without_icons(data):
+    """Keep the non-icon records of a Windows .res file byte for byte."""
+    records = []
+    at = 0
+    while at < len(data):
+        if len(data) - at < 12:
+            raise ValueError("truncated Windows resource header")
+        size, header, marker, kind = struct.unpack_from("<IIHH", data, at)
+        end = at + header + size + (-size & 3)
+        if header < 12 or header & 3 or end > len(data):
+            raise ValueError("invalid Windows resource size")
+        if marker != 0xFFFF or kind not in (3, 14):  # RT_ICON and RT_GROUP_ICON
+            records.append(data[at:end])
+        at = end
+    return b"".join(records)
+
+
 def res_of(images=(), strings=None):
     """a .res: the icon (images_of's), and the version strings when given"""
     res = res_entry(0, 0, b"", 0)   # (a .res file starts with an empty entry)

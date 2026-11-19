@@ -78,6 +78,16 @@ def main():
             fail("the game's .res holds resource types %s, not its version strings alone (16): its icon would clash" % kinds)
         if build_mod.exe_resources(work) != [os.path.join(work, build_mod.BRAND_RES), str(named)]:
             fail("with the game's name, exe_resources gives %s, not Longshot's icon and the name" % build_mod.exe_resources(work))
+        legacy = make_icon.res_of(images[:1], {"FileDescription": "Cached title"})
+        named.write_bytes(legacy)
+        linked = build_mod.exe_resources(work)
+        version = [entry for entry in entries(legacy) if entry[0] == 16]
+        actual = [entry for entry in entries(Path(linked[1]).read_bytes()) if entry[0]]
+        if actual != version or named.read_bytes() != legacy:
+            fail("cached game resource still links its old icon or loses its title")
+        named.write_bytes(make_icon.res_of(images[:1]))
+        if build_mod.exe_resources(work) != [linked[0]]:
+            fail("an icon-only cached resource was linked beside the brand")
     print("PASS: the exe's icon is Longshot's (%d sizes), beside the game's name when it has one" % len(images))
 
 

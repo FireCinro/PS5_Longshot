@@ -458,6 +458,16 @@ def exe_resources(work=None, brand=BRAND_ICON):
         out.append(res)
     named = os.path.join(work, "longshot_game.res")
     if os.path.exists(named):
+        if out:   # (a standalone build may reuse a pre-branding resource containing a game icon)
+            import game_title
+            with open(named, "rb") as f:
+                cached = f.read()
+            title_only = make_icon.without_icons(cached)
+            if title_only != cached:
+                if title_only == make_icon.res_of():
+                    return out
+                named = os.path.join(work, "longshot_game_title_only.res")
+                game_title.write_if_changed(named, title_only)
         out.append(named)
     return out
 
