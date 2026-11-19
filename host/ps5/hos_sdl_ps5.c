@@ -188,12 +188,25 @@ static void audio_fill(int16_t *frames, int count, void *user) {
             }
         }
 }
-int hos_sdl_audio_open(int freq, int channels, int s16, void (*pull)(void *user, uint8_t *out, int len), void *user) {
-    if (freq != 48000) hos_log("ps5: the game's sound is %d Hz, played as 48000", freq);
-    if (channels < 1 || channels > 8) return 0;
-    audio_pull = pull, audio_user = user, audio_channels = channels, audio_s16 = s16;
-    return audio_start(audio_fill, NULL);
+static int audio_token;
+int hos_sdl_output_count(void) { return 0; }
+int hos_sdl_output_info(int index, char *id, int id_capacity, char *name, int name_capacity) {
+    (void)index, (void)id, (void)id_capacity, (void)name, (void)name_capacity;
+    return 0;
 }
+int hos_sdl_output_resolve(const char *id) { (void)id; return -1; }
+void *hos_sdl_audio_open(unsigned device, int freq, int channels, int s16,
+                         void (*pull)(void *user, uint8_t *out, int len), void *user) {
+    (void)device;
+    if (freq != 48000) hos_log("ps5: the game's sound is %d Hz, played as 48000", freq);
+    if (channels < 1 || channels > 8) return NULL;
+    audio_pull = pull, audio_user = user, audio_channels = channels, audio_s16 = s16;
+    return audio_start(audio_fill, NULL) ? &audio_token : NULL;
+}
+void hos_sdl_audio_close(void *audio) {
+    if (audio) audio_stop();
+}
+int hos_sdl_audio_alive(void *audio) { return audio != NULL; }
 int hos_sdl_audio_channels(void) { return 2; }
 
 /* ---- microphones: none ---- */

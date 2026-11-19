@@ -174,6 +174,9 @@ def lift(kit, work, exefs, lift_jobs):
     if os.path.exists(mark):
         os.remove(mark)
     os.makedirs(os.path.join(work, "lift", "image"), exist_ok=True)
+    hot = os.path.join(src, "assets", "profiles", "hot_funcs.txt")
+    if os.path.isfile(hot) and not env.get("A64_HOT_FUNCS"):
+        env["A64_HOT_FUNCS"] = hot
     if lift_jobs:
         env["LONGSHOT_LIFT_JOBS"] = str(lift_jobs)
     run([sys.executable, "-I", "-u", os.path.join(src, "nx2", "lift.py"), "--standalone", "--write", "--exefs", exefs,
@@ -194,32 +197,57 @@ def compile_game(kit, info, work, gen, clang, jobs):
          os.path.join(src, "nx2"), rt64], env=env, what="the runtime header")
     place = lambda a: a.replace("{kit}", kit).replace("{rt64}", rt64).replace("{gen}", gen)
     flags = [place(a) for a in info["target_flags"] + info["game_flags"]]
+    hot_flags = ["-O2" if a == "-O1" else a for a in flags]
+    light_passes = ["ipsccp", "called-value-propagation", "globalopt", "openmp-opt", "deadargelim", "globaldce",
+                    "elim-avail-extern", "rpo-function-attrs", "function-attrs", "constmerge", "cg-profile",
+                    "rel-lookup-table-converter", "inline", "inliner-ml-advisor-release"]
+    light_extra = ["-mllvm", "-opt-disable=" + ",".join(light_passes), "-mllvm", "-opt-bisect-verbose=false"]
+    use_light = subprocess.run([clang, "-x", "c", "-O1", "-Wno-everything", "-S", "-o", os.devnull, "-"] + light_extra,
+                               input="int f(int x){return x+1;}\n", capture_output=True, text=True).returncode == 0
     chunks = sorted(f for f in os.listdir(gen) if f.startswith("code_") and f.endswith(".c"))
     sources = [os.path.join(gen, c) for c in chunks] + [os.path.join(gen, f) for f in info["game_files"]] + \
         [os.path.join(rt64, "a64_rt.c")]
     obj_dir = os.path.join(work, "obj")
     os.makedirs(obj_dir, exist_ok=True)
     version = subprocess.run([clang, "--version"], capture_output=True, text=True).stdout.splitlines()[0]
-    say("compiler: %s; %d files, %d at once" % (version, len(sources), jobs))
+    say("compiler: %s; %d files, %d at once%s" % (version, len(sources), jobs, " (hot -O2, light passes)" if use_light else " (hot -O2)"))
     heads = hashlib.sha1()
     for d in (rt64, os.path.join(kit, "src", "third_party", "a64-kit", "rt"), os.path.join(kit, "src", "nx2", "rt"), gen):
         for f in sorted(os.listdir(d)):
             if f.endswith(".h"):
                 heads.update(f.encode() + open(os.path.join(d, f), "rb").read())
-    base = hashlib.sha1((" ".join(info["target_flags"] + info["game_flags"]) + version).encode() + heads.digest()).hexdigest()
+    base_digest = heads.digest()
+
+    sys.path.insert(0, os.path.join(src, "nx2"))
+    import lifted_c
+
+    def largest_fn(raw):
+        starts = [m.start() - 1 for m in lifted_c.definitions(raw)]
+        i = raw.find(b"\nstatic __attribute__((noinline)) uintptr_t s_")
+        while i >= 0:
+            starts.append(i)
+            i = raw.find(b"\nstatic __attribute__((noinline)) uintptr_t s_", i + 1)
+        starts = sorted(starts) + [len(raw)]
+        return max([b - a for a, b in zip(starts, starts[1:])] or [0])
 
     def one(s):
-        obj = os.path.join(obj_dir, "game_" + os.path.basename(s)[:-2] + ".o")
-        h = hashlib.sha1(base.encode())
-        with open(s, "rb") as f:
-            for block in iter(lambda: f.read(1 << 20), b""):
-                h.update(block)
+        bn = os.path.basename(s)
+        obj = os.path.join(obj_dir, "game_" + bn[:-2] + ".o")
+        raw = open(s, "rb").read()
+        if bn.startswith("code_hot"):
+            fl = hot_flags
+        elif use_light and bn.startswith("code_") and largest_fn(raw) < 1024 * 1024:
+            fl = flags + light_extra
+        else:
+            fl = flags
+        h = hashlib.sha1((" ".join(fl) + version).encode() + base_digest)
+        h.update(raw)
         key, stamp = h.hexdigest(), obj + ".key"
         if os.path.exists(obj) and os.path.exists(stamp) and open(stamp).read() == key:
             return obj, None
-        r = subprocess.run([clang] + flags + ["-c", s, "-o", obj], capture_output=True, text=True, errors="replace")
+        r = subprocess.run([clang] + fl + ["-c", s, "-o", obj], capture_output=True, text=True, errors="replace")
         if r.returncode:
-            return obj, "%s: exit %d\n%s" % (os.path.basename(s), r.returncode, (r.stdout + r.stderr)[-3000:])
+            return obj, "%s: exit %d\n%s" % (bn, r.returncode, (r.stdout + r.stderr)[-3000:])
         open(stamp, "w").write(key)
         return obj, None
 

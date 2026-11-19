@@ -87,7 +87,7 @@ def jobs_for(rt64, gen_dir):
     game_digest = tree_digest(GEN, rt64, os.path.join(kit.KIT, "rt"), os.path.join(ROOT, "nx2", "rt"))
     game_fl = COMMON + ["-I" + rt64, "-I" + GEN, "-I" + os.path.join(kit.KIT, "rt"), "-I" + os.path.join(ROOT, "nx2", "rt"),
                         "-fno-strict-aliasing", "-mcx16", "-O1", "-mllvm", "-rotation-max-header-size=0", "-mllvm",
-                        "-capture-tracking-max-uses-to-explore=5000", "-DA64_POLLING", "-DA64_WRITE_TRACK"]
+                        "-capture-tracking-max-uses-to-explore=5000", "-DA64_POLLING", "-DA64_WRITE_TRACK", "-DA64_MARK_BITMAP"]
     # (no lifted game: --kit's build, which compiles none of it)
     chunks = sorted(f for f in os.listdir(GEN) if f.startswith("code_") and f.endswith(".c")) if os.path.isdir(GEN) else []
     game = [os.path.join(GEN, c) for c in chunks] + \
@@ -102,7 +102,7 @@ def jobs_for(rt64, gen_dir):
                         "-I" + os.path.join(DEPS, "zstd", "include"),
                         "-I" + os.path.join(pkg("vulkanheaders", "v1.4.345"), "include"),
                         "-Werror=implicit-function-declaration"]
-    skip = {"display.c", "mf_av1.c", "rx_nowgpu.c", "pgo_rt.c", "hos_sdl.c", "mingw_msvc_shims.c", "msvc_oldnames.c", "dav1d_av1.c"}
+    skip = {"display.c", "mf_av1.c", "rx_nowgpu.c", "pgo_rt.c", "hos_sdl.c", "mingw_msvc_shims.c", "msvc_oldnames.c", "dav1d_av1.c", "hos_tracy_game.c"}
     host = [os.path.join(HOST, f) for f in sorted(os.listdir(HOST)) if f.endswith(".c") and f not in skip] + \
         [os.path.join(POSIX, f) for f in ("win32_posix.c", "display_sdl.c", "linux_stubs.c")] + \
         [os.path.join(PS5, f) for f in sorted(os.listdir(PS5)) if f.endswith(".c")]
@@ -158,11 +158,11 @@ def jobs_for(rt64, gen_dir):
         lib = os.path.relpath(s, VK).split(os.sep)[0] in ("eden", "sirit")
         fl = vfl + ([shader_stamp] if os.path.basename(s) == "vk_shader.cpp" else []) + \
             ([stamp] if os.path.basename(s) == "vk_menu.cpp" else []) + \
-            (imgui_fl if os.path.basename(s) in ("vk_imgui.cpp", "vk_menu.cpp") else []) + \
+            (imgui_fl if os.path.basename(s) in ("vk_imgui.cpp", "vk_menu.cpp", "vk_crash_window.cpp") else []) + \
             (["-DHOOKSHOT_MIHAWKGEN", "-I" + os.path.join(MIHAWKGEN, "framegen", "include")]
              if HAS_MIHAWKGEN and os.path.basename(s) == "vk_framegen.cpp" else [])
         out.append((s, os.path.join(OUT, "obj", "vk_" + rel + ".o"), fl,
-                    lib_digest if lib else vk_digest + (imgui_digest if os.path.basename(s) in ("vk_imgui.cpp", "vk_menu.cpp") else "")))
+                    lib_digest if lib else vk_digest + (imgui_digest if os.path.basename(s) in ("vk_imgui.cpp", "vk_menu.cpp", "vk_crash_window.cpp") else "")))
     if HAS_MIHAWKGEN:   # (its Vulkan calls through the back end's loaded pointers: vk_loader.h, as every unit of gpu/vk)
         mfl = vfl + ["-include", os.path.join(VK, "vk_loader.h"), "-I" + os.path.join(MIHAWKGEN, "framegen", "include"),
                      "-I" + os.path.join(MIHAWKGEN, "framegen", "src")]

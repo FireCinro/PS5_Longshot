@@ -144,7 +144,7 @@ class Sender(QThread):
 class Window(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Longshot PS5 Builder")
+        self.setWindowTitle("Longshot PS5 Builder (v3.0.0)")
         icon = os.path.join(HERE, "longshot.png")
         if os.path.exists(icon):
             self.setWindowIcon(QIcon(icon))
@@ -155,7 +155,7 @@ class Window(QWidget):
         self.stopping = False
         self.error = ""
 
-        head = QLabel("Longshot PS5 Builder")
+        head = QLabel("Longshot PS5 Builder (v3.0.0)")
         f = QFont(self.font())
         f.setPointSize(f.pointSize() + 6)
         f.setBold(True)

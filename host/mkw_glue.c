@@ -15,7 +15,9 @@
 #ifndef _WIN32
 #include <dlfcn.h>
 #include <execinfo.h>
+#ifndef __PROSPERO__
 #include <sys/sysinfo.h>
+#endif
 #endif
 
 /* ---- the guest window ---------------------------------------------------------------------------------------
@@ -126,6 +128,9 @@ void hos_alloc_gave_up(size_t n, const char *what) {
 #ifdef _WIN32
     MEMORYSTATUSEX m = {.dwLength = sizeof m};
     if (GlobalMemoryStatusEx(&m)) left = m.ullAvailPageFile >> 20;
+#elif defined(__PROSPERO__)
+    extern uint64_t hos_ps5_direct_room(void);
+    left = hos_ps5_direct_room() >> 20;
 #else
     struct sysinfo si;
     if (!sysinfo(&si)) left = ((unsigned long long)si.freeram + si.bufferram + si.freeswap) * si.mem_unit >> 20;

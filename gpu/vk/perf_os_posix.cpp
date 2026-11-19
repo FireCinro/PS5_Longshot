@@ -3,6 +3,16 @@
 
 #include "perf_os.h"
 
+#ifdef __PROSPERO__
+namespace mkwvk::perf_os {
+std::string argv_path(const std::filesystem::path& path) {
+    const auto bytes = path.u8string();
+    return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+}
+bool run(const std::filesystem::path&, const std::vector<std::string>&) { return false; }
+}   // namespace mkwvk::perf_os
+#else
+
 #include <fcntl.h>
 #include <spawn.h>
 #include <sys/wait.h>
@@ -38,5 +48,6 @@ bool run(const std::filesystem::path& executable, const std::vector<std::string>
 }
 
 }   // namespace mkwvk::perf_os
+#endif   // __PROSPERO__
 
 #endif   // !_WIN32
